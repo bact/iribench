@@ -5,7 +5,7 @@ the problem where each SPDX release uses its own namespace
 (`https://spdx.org/rdf/3.1/terms/` vs `3.0.1/terms/` etc.) rather than a
 shared canonical one.
 
-Java port of [sameas-bench](../sameas-bench) (Python/rdflib).
+Java port of [sameas-bench](https://github.com/bact/sameas-bench) (Python/rdflib).
 Uses **Apache Jena 6.0** (ARQ + OWL reasoner + `jena-shacl`).
 
 See: [spdx-spec #1378](https://github.com/spdx/spdx-spec/issues/1378)
