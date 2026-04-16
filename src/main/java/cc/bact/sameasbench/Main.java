@@ -66,8 +66,8 @@ public class Main implements Runnable {
         int repeats;
         @Option(names = "--no-owlrl", description = "Skip OWL-RL expansion queries.")
         boolean skipOwlrl;
-        @Option(names = {"-v","--verbose"}, description = "Show per-step progress.")
-        boolean verbose;
+        @Option(names = {"-v","--verbose"}, defaultValue = "true", description = "Show per-step progress.")
+        boolean verbose = true;
 
         @Override public void run() {
             execute(versions, packages, repeats, skipOwlrl, verbose, false);
@@ -90,7 +90,7 @@ public class Main implements Runnable {
         boolean skipOwlrl;
         @Option(names = "--owlrl", description = "Force OWL-RL even in quick mode.")
         boolean forceOwlrl;
-        @Option(names = {"-v","--verbose"}) boolean verbose;
+        @Option(names = {"-v","--verbose"}, defaultValue = "true") boolean verbose = true;
 
         @Override public void run() {
             boolean owl = forceOwlrl || !skipOwlrl;
