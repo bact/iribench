@@ -49,7 +49,7 @@ echo "Installing to $LIB_DIR …"
 mkdir -p "$LIB_DIR" "$BIN_DIR"
 cp "$JAR" "$LIB_DIR/sameas-bench.jar"
 
-WRAPPER="$BIN_DIR/sameas-bench"
+WRAPPER="$BIN_DIR/sameas-bench-java"
 cat > "$WRAPPER" <<EOF
 #!/usr/bin/env bash
 exec "\${JAVA_HOME:+\$JAVA_HOME/bin/}java" \${JAVA_OPTS:-} -jar "$LIB_DIR/sameas-bench.jar" "\$@"
@@ -62,4 +62,4 @@ if ! echo "$PATH" | grep -q "$BIN_DIR"; then
     echo "  Add to PATH:  export PATH=\"$BIN_DIR:\$PATH\""
 fi
 echo ""
-echo "Quick test:  sameas-bench smoke"
+echo "Quick test:  sameas-bench-java smoke"

@@ -6,7 +6,7 @@ the problem where each SPDX release uses its own namespace
 shared canonical one.
 
 Java port of [sameas-bench](../sameas-bench) (Python/rdflib).
-Uses **Apache Jena 4.10.0** (ARQ + `OWL_MEM_RULE_INF` + `jena-shacl`).
+Uses **Apache Jena 6.0** (ARQ + OWL reasoner + `jena-shacl`).
 
 See: [spdx-spec #1378](https://github.com/spdx/spdx-spec/issues/1378)
 
@@ -16,8 +16,9 @@ See: [spdx-spec #1378](https://github.com/spdx/spdx-spec/issues/1378)
 
 | Requirement | Version |
 | ----------- | ------- |
-| Java | 17+ |
+| Java | 25+ |
 | Maven | 3.8+ (or use included `./mvnw`) |
+| Apache Jena | 6.0 |
 
 No other setup needed. SPDX ontology TTLs are downloaded on first run and
 cached in `~/.cache/sameas-bench/`.
@@ -44,8 +45,8 @@ export PATH="$HOME/.local/bin:$PATH"   # add to ~/.zshrc or ~/.bashrc
 Verify:
 
 ```bash
-sameas-bench --version   # 1.0
-sameas-bench smoke       # runs in-memory smoke test, ~20 s
+sameas-bench-java --version   # 1.0
+sameas-bench-java smoke       # runs in-memory smoke test, ~20 s
 ```
 
 ---
@@ -55,9 +56,9 @@ sameas-bench smoke       # runs in-memory smoke test, ~20 s
 ### `smoke` — fast in-memory test (no download)
 
 ```bash
-sameas-bench smoke                   # 3 toy versions, 4 packages each
-sameas-bench smoke --versions 5      # 5 toy versions
-sameas-bench smoke --no-owlrl        # skip OWL-RL expansion
+sameas-bench-java smoke                   # 3 toy versions, 4 packages each
+sameas-bench-java smoke --versions 5      # 5 toy versions
+sameas-bench-java smoke --no-owlrl        # skip OWL-RL expansion
 ```
 
 Good for development and CI. Completes in seconds.
@@ -65,9 +66,9 @@ Good for development and CI. Completes in seconds.
 ### `quick` — fast run with real SPDX ontologies
 
 ```bash
-sameas-bench quick                   # 2 versions, 10 packages, 1 repeat, no OWL-RL
-sameas-bench quick --versions 3      # 3 versions
-sameas-bench quick --owlrl           # include OWL-RL (slow!)
+sameas-bench-java quick                   # 2 versions, 10 packages, 1 repeat, no OWL-RL
+sameas-bench-java quick --versions 3      # 3 versions
+sameas-bench-java quick --owlrl           # include OWL-RL (slow!)
 ```
 
 Downloads SPDX 3.0.1 and 3.1 TTLs on first run (cached afterward).
@@ -75,17 +76,17 @@ Downloads SPDX 3.0.1 and 3.1 TTLs on first run (cached afterward).
 ### `run` — full benchmark
 
 ```bash
-sameas-bench run                     # 7 versions, 50 packages, 3 repeats
-sameas-bench run --versions 3        # fewer versions
-sameas-bench run --packages 20       # fewer packages (faster)
-sameas-bench run --no-owlrl          # skip OWL-RL (much faster)
+sameas-bench-java run                     # 7 versions, 50 packages, 3 repeats
+sameas-bench-java run --versions 3        # fewer versions
+sameas-bench-java run --packages 20       # fewer packages (faster)
+sameas-bench-java run --no-owlrl          # skip OWL-RL (much faster)
 ```
 
 ### `list-cache` / `clear-cache`
 
 ```bash
-sameas-bench list-cache    # show cached ontology TTLs + generated SHACL shapes
-sameas-bench clear-cache   # delete cached TTLs (forces re-download on next run)
+sameas-bench-java list-cache    # show cached ontology TTLs + generated SHACL shapes
+sameas-bench-java clear-cache   # delete cached TTLs (forces re-download on next run)
 ```
 
 ---
@@ -133,18 +134,18 @@ both `owl:equivalentClass` and `rdfs:subClassOf` axioms are present.
 ## Building from source (without install)
 
 ```bash
-./mvnw package -q                         # builds target/sameas-bench.jar
-java -jar target/sameas-bench.jar smoke   # run directly
+./mvnw package -q                              # builds target/sameas-bench.jar
+java -jar target/sameas-bench.jar smoke        # run directly
 ```
 
 ---
 
 ## Differences from Python version
 
-| Aspect | Python (rdflib) | Java (Jena) |
+| Aspect | Python (rdflib) | Java (Jena 6.0) |
 | ------ | --------------- | ----------- |
 | SPARQL engine | rdflib ARQ (Python) | Jena ARQ (native Java) |
-| OWL reasoning | owlrl (pure Python) | `OWL_MEM_RULE_INF` (Jena rule engine) |
+| OWL reasoning | owlrl (pure Python) | Jena OWL reasoner (built-in rule engine) |
 | SHACL | pyshacl | jena-shacl |
-| Reasoner approach | Pre-materialization (owlrl adds all closure triples) | Materialization by copying `OntModel` to plain `Model` |
+| Reasoner approach | Pre-materialization (owlrl adds all closure triples) | Materialization by copying `InfModel` to plain `Model` |
 | Performance | Baseline | Typically 5–50× faster for large graphs |

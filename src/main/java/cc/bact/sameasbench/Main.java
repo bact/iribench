@@ -9,11 +9,13 @@ import cc.bact.sameasbench.ontology.*;
 import cc.bact.sameasbench.report.ReportPrinter;
 import cc.bact.sameasbench.toy.ToyOntology;
 
+import org.apache.jena.sys.JenaSystem;
+
 import java.nio.file.*;
 import java.util.*;
 
 @Command(
-    name = "sameas-bench",
+    name = "sameas-bench-java",
     version = "1.0",
     mixinStandardHelpOptions = true,
     subcommands = {Main.RunCmd.class, Main.QuickCmd.class, Main.SmokeCmd.class,
@@ -30,13 +32,15 @@ import java.util.*;
         "SPARQL strategies: direct / union / owlrl+query",
         "SHACL: per-version shapes / canonical+OWL-RL",
         "",
-        "Uses Apache Jena 4.10.0 (ARQ + OWL_MEM_RULE_INF + jena-shacl).",
+        "Uses Apache Jena 6.0 (ARQ + OWL reasoner + jena-shacl).",
         "See: https://github.com/spdx/spdx-spec/issues/1378"
     }
 )
 public class Main implements Runnable {
 
     public static void main(String[] args) {
+        // Fat JARs break Jena's ServiceLoader init order; force explicit init.
+        JenaSystem.init();
         int exitCode = new CommandLine(new Main()).execute(args);
         System.exit(exitCode);
     }
@@ -166,6 +170,7 @@ public class Main implements Runnable {
     static void execute(int nVersions, int packages, int repeats,
                         boolean skipOwlrl, boolean verbose, boolean useToy) {
         boolean owlEnabled = !skipOwlrl;
+        System.out.printf("\033[1;36msameas-bench-java\033[0m v1.0  |  Apache Jena 6.0  |  jena-shacl%n");
         System.out.println();
 
         try {
@@ -180,7 +185,7 @@ public class Main implements Runnable {
             } else {
                 System.out.println("\033[1;36mLoading SPDX ontologies ...\033[0m");
                 System.out.println("  Cache: " + Constants.CACHE_DIR +
-                    "  (sameas-bench clear-cache to re-download)");
+                    "  (sameas-bench-java clear-cache to re-download)");
                 List<String> vList = Constants.versionsForN(nVersions);
                 versions = OntologyLoader.loadVersions(vList, verbose);
                 sharedBase = Constants.SHARED_BASE;
@@ -188,6 +193,7 @@ public class Main implements Runnable {
             }
 
             System.out.println();
+            if (!useToy) warnIfHeavy(nVersions, packages, repeats, owlEnabled);
             System.out.printf("\033[1;36mRunning benchmarks ...\033[0m  " +
                 "(%d version(s), %d pkg/ver, %d repeat(s), OWL-RL=%s)%n",
                 nVersions, packages, repeats, owlEnabled ? "on" : "off");
@@ -201,6 +207,42 @@ public class Main implements Runnable {
             System.err.println("\033[1;31mError:\033[0m " + e.getMessage());
             e.printStackTrace();
             System.exit(1);
+        }
+    }
+
+    private static long estimateOwlRlMs(int n, int pkgs) {
+        // Baseline: ~2s for 2 versions, 10 packages on a 2021 laptop with 8 GB RAM
+        // Jena OWL_MEM_RULE_INF is ~20x faster than Python owlrl
+        double nFactor = Math.pow((double) n / 2.0, 1.9);
+        double pFactor = Math.pow((double) pkgs / 10.0, 1.3);
+        return (long) (2_000.0 * nFactor * pFactor);
+    }
+
+    private static String fmtDuration(long ms) {
+        if (ms < 60_000L) return (ms / 1000) + " s";
+        long m = ms / 60_000L;
+        long s = (ms % 60_000L) / 1000;
+        return m + "m " + s + "s";
+    }
+
+    private static void warnIfHeavy(int n, int pkgs, int repeats, boolean owlEnabled) {
+        if (!owlEnabled) {
+            System.out.printf("  \033[2mEstimated run time: ~10-30 s  (OWL-RL skipped — only UNION + SHACL)\033[0m%n");
+            return;
+        }
+        // 4 queries x repeats per scenario; scenarios with OWL-RL: 2-ver + N-ver (if N>2)
+        int owlScenarios = n >= 2 ? (n > 2 ? 2 : 1) : 0;
+        long owlMs = estimateOwlRlMs(n, pkgs) * 4L * repeats * Math.max(owlScenarios, 1);
+        long totalMs = owlMs + 5_000L; // add 5s floor for UNION/SHACL
+        long WARN_THRESHOLD_MS = 60_000L;
+        if (totalMs > WARN_THRESHOLD_MS) {
+            System.out.printf(
+                "  \033[1;33m⚠ Time warning:\033[0m OWL-RL estimated ~%s total " +
+                "(timeout %ds/query). Use \033[1m--no-owlrl\033[0m to skip.%n",
+                fmtDuration(totalMs), BenchmarkRunner.OWLRL_TIMEOUT_MS / 1000);
+        } else {
+            System.out.printf("  \033[2mEstimated run time: ~%s (OWL-RL included, timeout %ds/query)\033[0m%n",
+                fmtDuration(totalMs), BenchmarkRunner.OWLRL_TIMEOUT_MS / 1000);
         }
     }
 

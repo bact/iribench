@@ -1,8 +1,10 @@
 package cc.bact.sameasbench.benchmark;
 
-import org.apache.jena.ontology.*;
 import org.apache.jena.query.*;
 import org.apache.jena.rdf.model.*;
+import org.apache.jena.reasoner.Reasoner;
+import org.apache.jena.reasoner.ReasonerRegistry;
+import org.apache.jena.rdf.model.InfModel;
 import org.apache.jena.riot.Lang;
 import org.apache.jena.riot.RDFDataMgr;
 import org.apache.jena.shacl.*;
@@ -29,7 +31,7 @@ public class BenchmarkRunner {
     // Internal: run SPARQL, return row count
     // -------------------------------------------------------------------
     private static int runQuery(Model model, String sparql) {
-        try (QueryExecution qe = QueryExecutionFactory.create(QueryFactory.create(sparql), model)) {
+        try (QueryExecution qe = QueryExecution.create().query(sparql).model(model).build()) {
             ResultSet rs = qe.execSelect();
             int count = 0;
             while (rs.hasNext()) { rs.nextSolution(); count++; }
@@ -42,12 +44,10 @@ public class BenchmarkRunner {
     // Returns (materializedModel, timedOut)
     // -------------------------------------------------------------------
     private static ModelAndTimeout expandOwlRl(Model combinedModel) {
-        ExecutorService executor = Executors.newSingleThreadExecutor();
-        try {
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             Future<Model> future = executor.submit(() -> {
-                OntModel inf = ModelFactory.createOntologyModel(OntModelSpec.OWL_MEM_RULE_INF);
-                inf.add(combinedModel);
-                // Force materialization by copying to plain model
+                Reasoner reasoner = ReasonerRegistry.getOWLReasoner();
+                InfModel inf = ModelFactory.createInfModel(reasoner, combinedModel);
                 Model mat = ModelFactory.createDefaultModel();
                 mat.add(inf);
                 return mat;
@@ -58,8 +58,6 @@ public class BenchmarkRunner {
             return new ModelAndTimeout(combinedModel, true);
         } catch (Exception e) {
             throw new RuntimeException("OWL-RL expansion failed: " + e.getMessage(), e);
-        } finally {
-            executor.shutdownNow();
         }
     }
 
@@ -119,7 +117,7 @@ public class BenchmarkRunner {
         );
         for (String tc : targetClassUris) {
             String q = "SELECT DISTINCT ?x WHERE { ?x a <" + tc + "> }";
-            try (QueryExecution qe = QueryExecutionFactory.create(QueryFactory.create(q), dataModel)) {
+            try (QueryExecution qe = QueryExecution.create().query(q).model(dataModel).build()) {
                 ResultSet rs = qe.execSelect();
                 while (rs.hasNext()) { rs.nextSolution(); targetCount++; }
             }
@@ -186,14 +184,14 @@ public class BenchmarkRunner {
                 SparqlQueries.licensesDirect(sharedBase),
                 SparqlQueries.depChainDirect(sharedBase),
                 SparqlQueries.countByTypeDirect(sharedBase))) {
-            try (QueryExecution qe = QueryExecutionFactory.create(sparql, wg)) {
+            try (QueryExecution qe = QueryExecution.create().query(sparql).model(wg).build()) {
                 qe.execSelect().forEachRemaining(s -> {});
             }
         }
         // 2. OWL-RL on representative graph
         if (owlEnabled) {
-            OntModel inf = ModelFactory.createOntologyModel(OntModelSpec.OWL_MEM_RULE_INF);
-            inf.add(wg);
+            Reasoner reasoner = ReasonerRegistry.getOWLReasoner();
+            InfModel inf = ModelFactory.createInfModel(reasoner, wg);
             Model mat = ModelFactory.createDefaultModel();
             mat.add(inf);
         }
@@ -237,7 +235,7 @@ public class BenchmarkRunner {
         Measurement buildM = built.measurement();
 
         ScenarioResult result = new ScenarioResult();
-        result.scenarioName = "Shared Namespace (" + versions.size() + " versions \u2192 1 dataset)";
+        result.scenarioName = "Shared (" + versions.size() + ")";
         result.versionsCount = versions.size();
         result.dataTriples = dataModel.size();
         result.equivTriples = 0;
@@ -289,7 +287,9 @@ public class BenchmarkRunner {
                 ));
             }
             Model em = ModelFactory.createDefaultModel();
-            em.add(EquivGraphBuilder.build(versions, sharedBase));
+            if (versions.size() > 1) {
+                em.add(EquivGraphBuilder.build(versions, sharedBase));
+            }
             return new DataAndEquiv(dm, em);
         });
         Model dataModel = built.value().dataModel();
@@ -478,20 +478,20 @@ public class BenchmarkRunner {
         oneV.put(allV.get(0), versions.get(allV.get(0)));
         if (verbose) System.out.printf("%n[Scenario 1b] Versioned - 1 version (%s)%n", allV.get(0));
         results.add(runVersioned(oneV, sharedBase, pkgPerVersion, repeats, verbose,
-            "Versioned - 1 version", owlEnabled));
+            "Versioned (1)", owlEnabled));
 
         // Scenario 2: first 2 versions
         Map<String, OntologyVersion> twoV = new LinkedHashMap<>();
         twoV.put(allV.get(0), versions.get(allV.get(0)));
         twoV.put(allV.get(1), versions.get(allV.get(1)));
         if (verbose) System.out.printf("%n[Scenario 2] Versioned - 2 versions (%s, %s)%n", allV.get(0), allV.get(1));
-        results.add(runVersioned(twoV, sharedBase, pkgPerVersion, repeats, verbose, "Versioned - 2 versions", owlEnabled));
+        results.add(runVersioned(twoV, sharedBase, pkgPerVersion, repeats, verbose, "Versioned (2)", owlEnabled));
 
         // Scenario 3: all versions (only if >2)
         if (allV.size() > 2) {
             if (verbose) System.out.printf("%n[Scenario 3] Versioned - %d versions%n", allV.size());
             results.add(runVersioned(versions, sharedBase, pkgPerVersion, repeats, verbose,
-                "Versioned - " + allV.size() + " versions", owlEnabled));
+                "Versioned (" + allV.size() + ")", owlEnabled));
         }
 
         // Scenario 4: reasoner tests

@@ -29,8 +29,13 @@ public class ReportPrinter {
         AsciiTable(String... headers) {
             this.headers = headers;
             this.widths = new int[headers.length];
-            for (int i = 0; i < headers.length; i++)
-                widths[i] = headers[i].length();
+            for (int i = 0; i < headers.length; i++) {
+                int maxLine = 0;
+                for (String line : headers[i].split("\n", -1)) {
+                    maxLine = Math.max(maxLine, line.length());
+                }
+                widths[i] = maxLine;
+            }
         }
 
         void addRow(String... cells) {
@@ -72,7 +77,24 @@ public class ReportPrinter {
         void print() {
             String b = border();
             System.out.println(b);
-            System.out.println(row(headers));
+            // Split headers on \n
+            String[][] splitH = new String[headers.length][];
+            int maxLines = 1;
+            for (int i = 0; i < headers.length; i++) {
+                splitH[i] = headers[i].split("\n", -1);
+                maxLines = Math.max(maxLines, splitH[i].length);
+            }
+            for (int line = 0; line < maxLines; line++) {
+                StringBuilder sb = new StringBuilder("|");
+                for (int i = 0; i < headers.length; i++) {
+                    String cell = (line < splitH[i].length) ? splitH[i][line] : "";
+                    int pad = widths[i] - cell.length();
+                    sb.append(' ').append(cell);
+                    for (int p = 0; p < pad; p++) sb.append(' ');
+                    sb.append(" |");
+                }
+                System.out.println(sb);
+            }
             System.out.println(b);
             for (String[] r : rows) System.out.println(row(r));
             System.out.println(b);
@@ -110,7 +132,7 @@ public class ReportPrinter {
         System.out.println();
         System.out.println(BOLD + CYAN + "========================================================================" + RESET);
         System.out.println(BOLD + CYAN + "  sameas-bench-java — SPDX Versioned IRI Overhead Benchmark" + RESET);
-        System.out.println(BOLD + CYAN + "  Apache Jena 4.10.0  |  OWL_MEM_RULE_INF  |  jena-shacl" + RESET);
+        System.out.println(BOLD + CYAN + "  Apache Jena 6.0  |  OWL reasoner  |  jena-shacl" + RESET);
         System.out.println(BOLD + CYAN + "========================================================================" + RESET);
     }
 
@@ -128,7 +150,7 @@ public class ReportPrinter {
             "   owl:equivalentClass graph + OWL-RL materialization, then canonical query");
         System.out.println();
         System.out.println(BOLD + "Limitations:" + RESET);
-        System.out.println("  - OWL-RL uses Jena's OWL_MEM_RULE_INF (not full OWL 2 RL)");
+        System.out.println("  - OWL-RL uses Jena's built-in OWL reasoner (not full OWL 2 RL)");
         System.out.println("  - Synthetic SBOM data mirrors real SPDX 3.x class/property structure");
         System.out.println("  - Memory measurement is approximate (JVM GC may affect readings)");
         System.out.println("  - Wall time includes JVM overhead; CPU time is per-thread");
@@ -140,7 +162,7 @@ public class ReportPrinter {
     private static void printGraphStats(List<ScenarioResult> results) {
         System.out.println();
         System.out.println(BOLD + "Graph Statistics" + RESET);
-        AsciiTable t = new AsciiTable("Scenario", "Versions", "Data Triples", "Equiv Triples",
+        AsciiTable t = new AsciiTable("Namespace\nscenario", "Versions", "Data Triples", "Equiv Triples",
             "Total Triples", "Build Time (ms)", "Build Mem (MB)");
         for (ScenarioResult r : results) {
             t.addRow(
@@ -166,7 +188,7 @@ public class ReportPrinter {
 
         System.out.println();
         System.out.println(BOLD + "Equivalence Graph Breakdown" + RESET);
-        AsciiTable t = new AsciiTable("Scenario", "equiv:Class pairs", "equiv:Prop pairs",
+        AsciiTable t = new AsciiTable("Namespace\nscenario", "equiv:Class pairs", "equiv:Prop pairs",
             "sameAs pairs", "Total Classes", "Total Props", "Total Individuals");
         for (ScenarioResult r : versioned) {
             EquivStats e = r.equivStats;
@@ -203,7 +225,7 @@ public class ReportPrinter {
             System.out.println("  " + BOLD + qname + RESET);
 
             // Collect all methods for this query across scenarios
-            AsciiTable t = new AsciiTable("Scenario", "Method", "Wall ms", "CPU ms", "Rows", "Timed out?");
+            AsciiTable t = new AsciiTable("Namespace\nscenario", "Method", "Wall ms", "CPU ms", "Rows", "Timed out?");
             for (ScenarioResult r : results) {
                 for (QueryResult q : r.queries) {
                     if (!q.name().equals(qname)) continue;
@@ -234,7 +256,7 @@ public class ReportPrinter {
     private static void printShaclResults(List<ScenarioResult> results) {
         System.out.println();
         System.out.println(BOLD + "SHACL Validation Results" + RESET);
-        AsciiTable t = new AsciiTable("Scenario", "Shapes config", "Inference",
+        AsciiTable t = new AsciiTable("Namespace\nscenario", "Shapes config", "Inference",
             "Conforms?", "Violations", "Targets", "Wall ms");
         for (ScenarioResult r : results) {
             for (ShaclResult s : r.shacl) {
@@ -262,7 +284,7 @@ public class ReportPrinter {
 
         // Find shared namespace baseline
         Optional<ScenarioResult> baseOpt = results.stream()
-            .filter(r -> r.scenarioName.equals("Shared Namespace")).findFirst();
+            .filter(r -> r.scenarioName.startsWith("Shared (")).findFirst();
         if (baseOpt.isEmpty()) {
             System.out.println("  (no shared namespace baseline found)");
             return;
@@ -275,7 +297,7 @@ public class ReportPrinter {
             baseDirectTime.put(q.name(), q.measurement().wallMs);
         }
 
-        AsciiTable t = new AsciiTable("Scenario", "Query", "Method",
+        AsciiTable t = new AsciiTable("Namespace\nscenario", "Query", "Method",
             "Wall ms", "vs. direct (x)", "Rows");
         for (ScenarioResult r : results) {
             for (QueryResult q : r.queries) {
@@ -416,6 +438,7 @@ public class ReportPrinter {
 
         System.out.printf("  CPU:          %s%n", cpuBrand);
         System.out.printf("  Logical CPUs: %d%n", cpus);
+        System.out.printf("  (Benchmark is single-threaded; logical CPU count shown for reference.)%n");
         if (totalRamBytes > 0)
             System.out.printf("  RAM:          %.1f GB%n", totalRamBytes / (1024.0 * 1024.0 * 1024.0));
         System.out.printf("  JVM:          %s (%s)%n", javaVersion, jvmName);
