@@ -20,6 +20,12 @@ See: [spdx-spec #1378](https://github.com/spdx/spdx-spec/issues/1378)
 | Maven | 3.8+ (or use included `./mvnw`) |
 | Apache Jena | 6.0 |
 
+To avoid `java.lang.OutOfMemoryError`, set JVM max heap size to 8 GB:
+
+```bash
+export JAVA_OPTS="-Xms2g -Xmx8g"
+```
+
 No other setup needed. SPDX ontology TTLs are downloaded on first run and
 cached in `~/.cache/sameas-bench/`.
 
