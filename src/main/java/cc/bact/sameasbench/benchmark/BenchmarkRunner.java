@@ -348,6 +348,13 @@ public class BenchmarkRunner {
         result.buildMeasurement = buildM;
         result.equivStats = computeEquivStats(equivModel, versions);
 
+        if (versionsList.size() == 1) {
+            if (verbose) {
+                System.out.println("    (Skipping query benchmark for 1-version scenario to save resources)");
+            }
+            return result;
+        }
+
         // SPARQL - UNION
         List<String[]> unionQueries = List.of(
                 new String[] {"Find packages + names", SparqlQueries.findPackagesUnion(bases)},

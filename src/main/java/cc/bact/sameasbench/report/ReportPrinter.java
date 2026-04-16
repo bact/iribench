@@ -227,6 +227,7 @@ public class ReportPrinter {
             // Collect all methods for this query across scenarios
             AsciiTable t = new AsciiTable("Namespace\nscenario", "Method", "Wall ms", "CPU ms", "Rows", "Timed out?");
             for (ScenarioResult r : results) {
+                if ("Versioned (1)".equals(r.scenarioName)) continue;
                 for (QueryResult q : r.queries) {
                     if (!q.name().equals(qname)) continue;
                     String wallStr = String.format("%.1f", q.measurement().wallMs);
@@ -259,6 +260,7 @@ public class ReportPrinter {
         AsciiTable t = new AsciiTable("Namespace\nscenario", "Shapes config", "Inference",
             "Conforms?", "Violations", "Targets", "Wall ms");
         for (ScenarioResult r : results) {
+            if ("Versioned (1)".equals(r.scenarioName)) continue;
             for (ShaclResult s : r.shacl) {
                 String conforms = s.conforms() ? GREEN + "yes" + RESET : RED + "NO" + RESET;
                 t.addRow(
@@ -300,6 +302,7 @@ public class ReportPrinter {
         AsciiTable t = new AsciiTable("Namespace\nscenario", "Query", "Method",
             "Wall ms", "vs. direct (x)", "Rows");
         for (ScenarioResult r : results) {
+            if ("Versioned (1)".equals(r.scenarioName)) continue;
             for (QueryResult q : r.queries) {
                 Double baseline = baseDirectTime.get(q.name());
                 String ratio;
@@ -347,8 +350,11 @@ public class ReportPrinter {
         System.out.println("  " + BOLD + "Result counts (rows returned)" + RESET);
         String[] colHeaders = new String[results.size() + 1];
         colHeaders[0] = "Query";
-        for (int i = 0; i < results.size(); i++)
-            colHeaders[i+1] = truncate(results.get(i).scenarioName.replace("Reasoner - ", ""), 30);
+        for (int i = 0; i < results.size(); i++) {
+            String name = results.get(i).scenarioName.replace("Reasoner - ", "");
+            name = name.replace(" (", "\n(").replace(" + ", "\n+ ");
+            colHeaders[i+1] = name;
+        }
         AsciiTable countTable = new AsciiTable(colHeaders);
         for (String qname : queryNames) {
             String[] row = new String[results.size() + 1];
