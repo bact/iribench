@@ -10,11 +10,9 @@ import org.apache.jena.riot.RDFDataMgr;
 import org.apache.jena.shacl.*;
 import org.apache.jena.shacl.validation.ReportEntry;
 import org.apache.jena.vocabulary.OWL;
-import org.apache.jena.vocabulary.RDF;
 import cc.bact.sameasbench.Measurement;
 import cc.bact.sameasbench.datagen.GeneratorConfig;
 import cc.bact.sameasbench.datagen.SbomGenerator;
-import cc.bact.sameasbench.ontology.Constants;
 import cc.bact.sameasbench.ontology.EquivGraphBuilder;
 import cc.bact.sameasbench.ontology.OntologyVersion;
 
@@ -544,10 +542,13 @@ public class BenchmarkRunner {
             System.out.println("  Warming up JVM + Jena engines ...");
         warmup(sharedBase, owlEnabled);
 
+        int totalScenarios = 1 + (allV.size() >= 2 ? 3 : 0) + (allV.size() > 2 ? 1 : 0);
+        int currentScenario = 1;
+
         // Scenario 1
         if (verbose)
-            System.out.printf("%n[Scenario 1] Shared namespace (%d versions, canonical IRI)%n",
-                    allV.size());
+            System.out.printf("%n[Scenario %d/%d] Shared namespace (%d versions, canonical IRI)%n",
+                    currentScenario++, totalScenarios, allV.size());
         results.add(runSharedNamespace(versions, sharedBase, pkgPerVersion, repeats, verbose));
 
         if (allV.size() < 2) {
@@ -556,37 +557,40 @@ public class BenchmarkRunner {
             return results;
         }
 
-        // Scenario 1b: Versioned 1-version — equal data volume to Shared Namespace,
+        // Scenario 2: Versioned 1-version — equal data volume to Shared Namespace,
         // so readers can compare all three strategies on the same dataset size.
         Map<String, OntologyVersion> oneV = new LinkedHashMap<>();
         oneV.put(allV.get(0), versions.get(allV.get(0)));
         if (verbose)
-            System.out.printf("%n[Scenario 1b] Versioned - 1 version (%s)%n", allV.get(0));
+            System.out.printf("%n[Scenario %d/%d] Versioned - 1 version (%s)%n", currentScenario++,
+                    totalScenarios, allV.get(0));
         results.add(runVersioned(oneV, sharedBase, pkgPerVersion, repeats, verbose, "Versioned (1)",
                 owlEnabled));
 
-        // Scenario 2: first 2 versions
+        // Scenario 3: first 2 versions
         Map<String, OntologyVersion> twoV = new LinkedHashMap<>();
         twoV.put(allV.get(0), versions.get(allV.get(0)));
         twoV.put(allV.get(1), versions.get(allV.get(1)));
         if (verbose)
-            System.out.printf("%n[Scenario 2] Versioned - 2 versions (%s, %s)%n", allV.get(0),
-                    allV.get(1));
+            System.out.printf("%n[Scenario %d/%d] Versioned - 2 versions (%s, %s)%n",
+                    currentScenario++, totalScenarios, allV.get(0), allV.get(1));
         results.add(runVersioned(twoV, sharedBase, pkgPerVersion, repeats, verbose, "Versioned (2)",
                 owlEnabled));
 
-        // Scenario 3: all versions (only if >2)
+        // Scenario 4: all versions (only if >2)
         if (allV.size() > 2) {
             if (verbose)
-                System.out.printf("%n[Scenario 3] Versioned - %d versions%n", allV.size());
+                System.out.printf("%n[Scenario %d/%d] Versioned - %d versions%n", currentScenario++,
+                        totalScenarios, allV.size());
             results.add(runVersioned(versions, sharedBase, pkgPerVersion, repeats, verbose,
                     "Versioned (" + allV.size() + ")", owlEnabled));
         }
 
-        // Scenario 4: reasoner tests
+        // Scenario 5: reasoner tests
         if (verbose)
-            System.out
-                    .println("\n[Scenario 4] Reasoner inference tests (equiv + subClassOf chain)");
+            System.out.printf(
+                    "\n[Scenario %d/%d] Reasoner inference tests (equiv + subClassOf chain)%n",
+                    currentScenario++, totalScenarios);
         results.addAll(runReasonerTests(versions, sharedBase, pkgPerVersion, repeats, verbose,
                 owlEnabled));
 
