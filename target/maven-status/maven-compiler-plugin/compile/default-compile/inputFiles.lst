@@ -7,6 +7,7 @@
 /Users/art/projects/sameas-bench-java/src/main/java/cc/bact/sameasbench/benchmark/ShaclResult.java
 /Users/art/projects/sameas-bench-java/src/main/java/cc/bact/sameasbench/benchmark/ShaclShapes.java
 /Users/art/projects/sameas-bench-java/src/main/java/cc/bact/sameasbench/benchmark/SparqlQueries.java
+/Users/art/projects/sameas-bench-java/src/main/java/cc/bact/sameasbench/datagen/DeterministicRng.java
 /Users/art/projects/sameas-bench-java/src/main/java/cc/bact/sameasbench/datagen/GeneratorConfig.java
 /Users/art/projects/sameas-bench-java/src/main/java/cc/bact/sameasbench/datagen/SbomGenerator.java
 /Users/art/projects/sameas-bench-java/src/main/java/cc/bact/sameasbench/ontology/Constants.java
