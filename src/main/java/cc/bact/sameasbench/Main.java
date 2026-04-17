@@ -231,19 +231,22 @@ public class Main implements Runnable {
             System.out.printf("  \033[2mEstimated run time: ~10-30 s  (OWL-RL skipped — only UNION + SHACL)\033[0m%n");
             return;
         }
-        // 4 queries x repeats per scenario; scenarios with OWL-RL: 2-ver + N-ver (if N>2)
-        int owlScenarios = n >= 2 ? (n > 2 ? 2 : 1) : 0;
-        long owlMs = estimateOwlRlMs(n, pkgs) * 4L * repeats * Math.max(owlScenarios, 1);
+        // 8 queries x repeats per scenario; all scenarios run OWL-RL if enabled
+        int owlScenarios = 1;
+        if (n >= 2) owlScenarios += 2;
+        if (n > 2) owlScenarios += 2;
+        
+        long owlMs = estimateOwlRlMs(n, pkgs) * 8L * repeats * owlScenarios;
         long totalMs = owlMs + 5_000L; // add 5s floor for UNION/SHACL
         long WARN_THRESHOLD_MS = 60_000L;
         if (totalMs > WARN_THRESHOLD_MS) {
             System.out.printf(
-                "  \033[1;33m⚠ Time warning:\033[0m OWL-RL estimated ~%s total " +
-                "(timeout %ds/query). Use \033[1m--no-owlrl\033[0m to skip.%n",
-                fmtDuration(totalMs), BenchmarkRunner.OWLRL_TIMEOUT_MS / 1000);
+                "  \033[1;33m⚠ Time warning:\033[0m OWL-RL estimated ~%s total. " +
+                "Use \033[1m--no-owlrl\033[0m to skip.%n",
+                fmtDuration(totalMs));
         } else {
-            System.out.printf("  \033[2mEstimated run time: ~%s (OWL-RL included, timeout %ds/query)\033[0m%n",
-                fmtDuration(totalMs), BenchmarkRunner.OWLRL_TIMEOUT_MS / 1000);
+            System.out.printf("  \033[2mEstimated run time: ~%s (OWL-RL included, on-demand inference)\033[0m%n",
+                fmtDuration(totalMs));
         }
     }
 

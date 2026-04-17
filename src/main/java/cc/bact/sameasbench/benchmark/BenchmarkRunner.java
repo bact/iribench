@@ -52,104 +52,129 @@ public class BenchmarkRunner {
     record ModelAndTimeout(Model model, boolean timedOut) {
     }
 
-    // Result carrier for a single query iteration
-    private record QueryIterResult(int count, boolean timedOut) {
-    }
+
 
     // Result carrier for a single SHACL iteration
     private record ShaclIterResult(boolean conforms, int violations) {
+    }
+
+    private static String getHeapConfig() {
+        long max = Runtime.getRuntime().maxMemory();
+        return (max / (1024 * 1024)) + " MiB";
     }
 
     // -------------------------------------------------------------------
     // Internal: bench one query
     // -------------------------------------------------------------------
     private static QueryResult benchQuery(Model model, String name, String method, String sparql,
-            int repeats, boolean expandOwl, boolean verbose) throws Exception {
-        List<Measurement> measurements = new ArrayList<>();
-        int count = 0;
-        boolean timedOut = false;
-        for (int i = 0; i < repeats; i++) {
-            Measurement.MeasuredResult<QueryIterResult> mr = Measurement.measureWithResult(() -> {
-                if (expandOwl) {
-                    ModelAndTimeout mat = expandOwlRl(model);
-                    int c = mat.timedOut() ? 0 : runQuery(mat.model(), sparql);
-                    return new QueryIterResult(c, mat.timedOut());
-                } else {
-                    return new QueryIterResult(runQuery(model, sparql), false);
+            int repeats, boolean expandOwl, boolean verbose) {
+        try {
+            Model targetModel = model;
+            if (expandOwl) {
+                targetModel = expandOwlRl(model).model();
+            }
+
+            // Cold start protection: run the query once and discard the result.
+            // This primes the SPARQL engine and the reasoner for this specific query.
+            runQuery(targetModel, sparql);
+
+            List<Measurement> measurements = new ArrayList<>();
+            int count = 0;
+            for (int i = 0; i < repeats; i++) {
+                final Model finalModel = targetModel;
+                Measurement.MeasuredResult<Integer> mr = Measurement.measureWithResult(() -> runQuery(finalModel, sparql));
+                if (verbose) {
+                    System.out.print(".");
+                    System.out.flush();
                 }
-            });
+                measurements.add(mr.measurement());
+                count = mr.value();
+            }
+            return new QueryResult(name, method, count, Measurement.average(measurements), false, null);
+        } catch (Throwable t) {
             if (verbose) {
-                System.out.print(".");
+                System.out.print(" [ERROR: " + t.getClass().getSimpleName() + "] ");
                 System.out.flush();
             }
-            measurements.add(mr.measurement());
-            count = mr.value().count();
-            timedOut = mr.value().timedOut();
-            if (timedOut)
-                break;
+            if (t instanceof OutOfMemoryError) {
+                System.gc(); // Try to recover
+                return new QueryResult(name, method, 0, new Measurement(0, 0), false, "OOM: " + getHeapConfig());
+            }
+            return new QueryResult(name, method, 0, new Measurement(0, 0), false, t.toString());
         }
-        return new QueryResult(name, method, count, Measurement.average(measurements), timedOut);
     }
 
     // -------------------------------------------------------------------
     // Internal: run SHACL
     // -------------------------------------------------------------------
     private static ShaclResult benchShacl(Model dataModel, String name, String shapesTtl,
-            String inference, int repeats, boolean verbose) throws Exception {
-        List<Measurement> measurements = new ArrayList<>();
-        boolean conforms = false;
-        int violations = 0;
-        int targetCount = 0;
+            String inference, int repeats, boolean verbose) {
+        try {
+            List<Measurement> measurements = new ArrayList<>();
+            boolean conforms = false;
+            int violations = 0;
+            int targetCount = 0;
 
-        // Compute target count (query data model for instances of each sh:targetClass)
-        Model shapesModel = ModelFactory.createDefaultModel();
-        RDFDataMgr.read(shapesModel,
-                new ByteArrayInputStream(shapesTtl.getBytes(StandardCharsets.UTF_8)), Lang.TURTLE);
-        Property targetClassProp =
-                shapesModel.createProperty("http://www.w3.org/ns/shacl#targetClass");
-        Set<String> targetClassUris = new HashSet<>();
-        shapesModel.listStatements(null, targetClassProp, (RDFNode) null).forEachRemaining(s -> {
-            if (s.getObject().isURIResource())
-                targetClassUris.add(s.getObject().asResource().getURI());
-        });
-        for (String tc : targetClassUris) {
-            String q = "SELECT DISTINCT ?x WHERE { ?x a <" + tc + "> }";
-            try (QueryExecution qe = QueryExecution.create().query(q).model(dataModel).build()) {
-                ResultSet rs = qe.execSelect();
-                while (rs.hasNext()) {
-                    rs.nextSolution();
-                    targetCount++;
+            // Compute target count (query data model for instances of each sh:targetClass)
+            Model shapesModel = ModelFactory.createDefaultModel();
+            RDFDataMgr.read(shapesModel,
+                    new ByteArrayInputStream(shapesTtl.getBytes(StandardCharsets.UTF_8)), Lang.TURTLE);
+            Property targetClassProp =
+                    shapesModel.createProperty("http://www.w3.org/ns/shacl#targetClass");
+            Set<String> targetClassUris = new HashSet<>();
+            shapesModel.listStatements(null, targetClassProp, (RDFNode) null).forEachRemaining(s -> {
+                if (s.getObject().isURIResource())
+                    targetClassUris.add(s.getObject().asResource().getURI());
+            });
+            for (String tc : targetClassUris) {
+                String q = "SELECT DISTINCT ?x WHERE { ?x a <" + tc + "> }";
+                try (QueryExecution qe = QueryExecution.create().query(q).model(dataModel).build()) {
+                    ResultSet rs = qe.execSelect();
+                    while (rs.hasNext()) {
+                        rs.nextSolution();
+                        targetCount++;
+                    }
                 }
             }
-        }
 
-        Model queryModel = inference.equals("owlrl") ? expandOwlRl(dataModel).model() : dataModel;
-        for (int i = 0; i < repeats; i++) {
-            Measurement.MeasuredResult<ShaclIterResult> mr = Measurement.measureWithResult(() -> {
-                Model sm2 = ModelFactory.createDefaultModel();
-                RDFDataMgr.read(sm2,
-                        new ByteArrayInputStream(shapesTtl.getBytes(StandardCharsets.UTF_8)),
-                        Lang.TURTLE);
-                Shapes shapes = Shapes.parse(sm2);
-                ValidationReport report =
-                        ShaclValidator.get().validate(shapes, queryModel.getGraph());
-                int v = 0;
-                for (ReportEntry entry : report.getEntries()) {
-                    v++;
+            Model queryModel = inference.equals("owlrl") ? expandOwlRl(dataModel).model() : dataModel;
+            
+            // Parse shapes once outside the measurement loop
+            Model sm = ModelFactory.createDefaultModel();
+            RDFDataMgr.read(sm, new ByteArrayInputStream(shapesTtl.getBytes(StandardCharsets.UTF_8)), Lang.TURTLE);
+            Shapes shapes = Shapes.parse(sm);
+
+            // Cold start protection: run validation once and discard
+            ShaclValidator.get().validate(shapes, queryModel.getGraph());
+
+            for (int i = 0; i < repeats; i++) {
+                Measurement.MeasuredResult<ShaclIterResult> mr = Measurement.measureWithResult(() -> {
+                    ValidationReport report = ShaclValidator.get().validate(shapes, queryModel.getGraph());
+                    int v = report.getEntries().size();
+                    return new ShaclIterResult(report.conforms(), v);
+                });
+                if (verbose) {
+                    System.out.print(".");
+                    System.out.flush();
                 }
-                return new ShaclIterResult(report.conforms(), v);
-            });
+                measurements.add(mr.measurement());
+                conforms = mr.value().conforms();
+                violations = mr.value().violations();
+            }
+
+            return new ShaclResult(name, inference, conforms, violations, targetCount,
+                    Measurement.average(measurements), null);
+        } catch (Throwable t) {
             if (verbose) {
-                System.out.print(".");
+                System.out.print(" [ERROR: " + t.getClass().getSimpleName() + "] ");
                 System.out.flush();
             }
-            measurements.add(mr.measurement());
-            conforms = mr.value().conforms();
-            violations = mr.value().violations();
+            if (t instanceof OutOfMemoryError) {
+                System.gc();
+                return new ShaclResult(name, inference, false, 0, 0, new Measurement(0, 0), "OOM: " + getHeapConfig());
+            }
+            return new ShaclResult(name, inference, false, 0, 0, new Measurement(0, 0), t.toString());
         }
-
-        return new ShaclResult(name, inference, conforms, violations, targetCount,
-                Measurement.average(measurements));
     }
 
     // -------------------------------------------------------------------
@@ -193,10 +218,23 @@ public class BenchmarkRunner {
     public static void warmup(String sharedBase, boolean owlEnabled) throws Exception {
         Model wg = SbomGenerator.generate(sharedBase, "https://example.org/sbom/warmup/",
                 new GeneratorConfig(5, 99));
-        // 1. SPARQL — all four query shapes used in the benchmark
-        for (String sparql : List.of(SparqlQueries.findPackagesDirect(sharedBase),
-                SparqlQueries.licensesDirect(sharedBase), SparqlQueries.depChainDirect(sharedBase),
-                SparqlQueries.countByTypeDirect(sharedBase))) {
+        // 1. SPARQL — all query shapes used in the benchmark
+        List<String> warmupQueries = new ArrayList<>(List.of(
+                SparqlQueries.findPackagesDirect(sharedBase),
+                SparqlQueries.licensesDirect(sharedBase),
+                SparqlQueries.depChainDirect(sharedBase),
+                SparqlQueries.countByTypeDirect(sharedBase)
+        ));
+        if (owlEnabled) {
+            warmupQueries.addAll(List.of(
+                    SparqlQueries.subclassTwoHop(sharedBase),
+                    SparqlQueries.superclassAll(sharedBase),
+                    SparqlQueries.superclassWithType(sharedBase),
+                    SparqlQueries.domainInference(sharedBase)
+            ));
+        }
+
+        for (String sparql : warmupQueries) {
             try (QueryExecution qe = QueryExecution.create().query(sparql).model(wg).build()) {
                 qe.execSelect().forEachRemaining(s -> {
                 });
@@ -485,54 +523,60 @@ public class BenchmarkRunner {
         List<ScenarioResult> results = new ArrayList<>();
 
         if (verbose)
-            System.out.println("  Warming up JVM + Jena engines ...");
+            System.out.println("  Cleaning heap and warming up JVM + Jena engines ...");
+        System.gc();
         warmup(sharedBase, owlEnabled);
 
-        int totalScenarios = allV.size() > 2 ? 4 : 3;
+        int totalScenarios = 1;
+        if (allV.size() >= 2) totalScenarios += 2;
+        if (allV.size() > 2) totalScenarios += 2;
         int currentScenario = 1;
 
-        // Scenario 1
-        if (verbose)
-            System.out.printf("%n[Scenario %d/%d] Shared namespace (%d versions, canonical IRI)%n",
-                    currentScenario++, totalScenarios, allV.size());
-        results.add(runSharedNamespace(versions, sharedBase, pkgPerVersion, repeats, verbose, owlEnabled));
-
-        if (allV.size() < 2) {
-            if (verbose)
-                System.out.println("  (only 1 version loaded - skipping versioned scenarios)");
-            return results;
-        }
-
-        // Scenario 2: Versioned 1-version — equal data volume to Shared Namespace,
-        // so readers can compare all three strategies on the same dataset size.
+        // Scenario 1: Versioned (1)
         Map<String, OntologyVersion> oneV = new LinkedHashMap<>();
         oneV.put(allV.get(0), versions.get(allV.get(0)));
         if (verbose)
             System.out.printf("%n[Scenario %d/%d] Versioned - 1 version (%s)%n", currentScenario++,
                     totalScenarios, allV.get(0));
+        System.gc();
         results.add(runVersioned(oneV, sharedBase, pkgPerVersion, repeats, verbose, "Versioned (1)",
                 owlEnabled));
 
-        // Scenario 3: first 2 versions
+        if (allV.size() < 2) return results;
+
+        // Scenarios 2 & 3: Shared (2) vs Versioned (2)
         Map<String, OntologyVersion> twoV = new LinkedHashMap<>();
         twoV.put(allV.get(0), versions.get(allV.get(0)));
         twoV.put(allV.get(1), versions.get(allV.get(1)));
+        
         if (verbose)
-            System.out.printf("%n[Scenario %d/%d] Versioned - 2 versions (%s, %s)%n",
-                    currentScenario++, totalScenarios, allV.get(0), allV.get(1));
+            System.out.printf("%n[Scenario %d/%d] Shared namespace (2 versions, canonical IRI)%n",
+                    currentScenario++, totalScenarios);
+        System.gc();
+        results.add(runSharedNamespace(twoV, sharedBase, pkgPerVersion, repeats, verbose, owlEnabled));
+
+        if (verbose)
+            System.out.printf("%n[Scenario %d/%d] Versioned - 2 versions%n",
+                    currentScenario++, totalScenarios);
+        System.gc();
         results.add(runVersioned(twoV, sharedBase, pkgPerVersion, repeats, verbose, "Versioned (2)",
                 owlEnabled));
 
-        // Scenario 4: all versions (only if >2)
-        if (allV.size() > 2) {
-            if (verbose)
-                System.out.printf("%n[Scenario %d/%d] Versioned - %d versions%n", currentScenario++,
-                        totalScenarios, allV.size());
-            results.add(runVersioned(versions, sharedBase, pkgPerVersion, repeats, verbose,
-                    "Versioned (" + allV.size() + ")", owlEnabled));
-        }
+        if (allV.size() <= 2) return results;
 
+        // Scenarios 4 & 5: Shared (N) and Versioned (N)
+        if (verbose)
+            System.out.printf("%n[Scenario %d/%d] Shared namespace (%d versions, canonical IRI)%n",
+                    currentScenario++, totalScenarios, allV.size());
+        System.gc();
+        results.add(runSharedNamespace(versions, sharedBase, pkgPerVersion, repeats, verbose, owlEnabled));
 
+        if (verbose)
+            System.out.printf("%n[Scenario %d/%d] Versioned - %d versions%n", currentScenario++,
+                    totalScenarios, allV.size());
+        System.gc();
+        results.add(runVersioned(versions, sharedBase, pkgPerVersion, repeats, verbose,
+                "Versioned (" + allV.size() + ")", owlEnabled));
 
         return results;
     }

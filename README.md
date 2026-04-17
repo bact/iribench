@@ -20,10 +20,10 @@ See: [spdx-spec #1378](https://github.com/spdx/spdx-spec/issues/1378)
 | Maven | 3.8+ (or use included `./mvnw`) |
 | Apache Jena | 6.0 |
 
-To avoid `java.lang.OutOfMemoryError`, set JVM max heap size to 8 GB:
+To avoid `java.lang.OutOfMemoryError` on large ontologies, set JVM max heap size to 16 GB:
 
 ```bash
-export JAVA_OPTS="-Xms2g -Xmx8g"
+export JAVA_OPTS="-Xms2g -Xmx16g"
 ```
 
 No other setup needed. SPDX ontology TTLs are downloaded on first run and
@@ -126,6 +126,17 @@ sameas-bench-java clear-cache   # delete cached TTLs (forces re-download on next
 ./mvnw package -q                              # builds target/sameas-bench.jar
 java -jar target/sameas-bench.jar smoke        # run directly
 ```
+
+---
+
+## Benchmarking strategy (accuracy & isolation)
+
+To ensure high-fidelity measurements and minimize JVM-induced noise, the benchmark uses several isolation strategies:
+
+1. **Global engine warmup**: Before any measurements begin, the JVM and Jena's query/reasoner engines are primed with a synthetic workload. This ensures that JIT compilation and internal engine caches are steady.
+2. **Cold-start protection**: Within each scenario, every distinct SPARQL query and SHACL validation is executed once (unmeasured) before the timing repeats start. This isolates the execution performance from the initial parsing and planning phase.
+3. **Preemptive garbage collection**: `System.gc()` is explicitly invoked before each scenario block begins. This clears out models and triples from previous scenarios, ensuring that each benchmark starts with a clean heap and reducing the likelihood of a major GC pause during measurement.
+4. **Inference engine reuse**: For reasoning scenarios, the `InfModel` is expanded once outside the measurement loop. This allows us to measure the "hot" performance of the backward-chaining engine rather than the one-time rule setup overhead.
 
 ---
 

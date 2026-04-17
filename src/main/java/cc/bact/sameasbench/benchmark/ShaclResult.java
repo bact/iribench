@@ -8,5 +8,6 @@ public record ShaclResult(
     boolean conforms,
     int violationCount,
     int targetCount,
-    Measurement measurement
+    Measurement measurement,
+    String error
 ) {}

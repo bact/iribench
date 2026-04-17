@@ -52,7 +52,7 @@ cp "$JAR" "$LIB_DIR/sameas-bench.jar"
 WRAPPER="$BIN_DIR/sameas-bench-java"
 cat > "$WRAPPER" <<EOF
 #!/usr/bin/env bash
-exec "\${JAVA_HOME:+\$JAVA_HOME/bin/}java" \${JAVA_OPTS:--Xms2g -Xmx8g} -jar "$LIB_DIR/sameas-bench.jar" "\$@"
+exec "\${JAVA_HOME:+\$JAVA_HOME/bin/}java" \${JAVA_OPTS:--Xms2g -Xmx16g} -jar "$LIB_DIR/sameas-bench.jar" "\$@"
 EOF
 chmod +x "$WRAPPER"
 

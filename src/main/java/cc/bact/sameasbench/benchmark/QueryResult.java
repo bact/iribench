@@ -7,5 +7,6 @@ public record QueryResult(
     String method,
     int resultCount,
     Measurement measurement,
-    boolean timedOut
+    boolean timedOut,
+    String error
 ) {}

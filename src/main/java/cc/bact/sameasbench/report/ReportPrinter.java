@@ -162,8 +162,13 @@ public class ReportPrinter {
         System.out.println("  - OWL-RL uses Jena's built-in OWL reasoner (not full OWL 2 RL)");
         System.out
                 .println("  - Synthetic SBOM data mirrors real SPDX 3.x class/property structure");
-        System.out.println("  - Memory measurement is approximate (JVM GC may affect readings)");
         System.out.println("  - Wall time includes JVM overhead; CPU time is per-thread");
+
+        System.out.println();
+        System.out.println(BOLD + "Accuracy Strategy:" + RESET);
+        System.out.println("  - " + BOLD + "Warmup:" + RESET + " Engines primed before timing.");
+        System.out.println("  - " + BOLD + "Isolation:" + RESET + " System.gc() before each scenario block.");
+        System.out.println("  - " + BOLD + "Protection:" + RESET + " Unmeasured discarded first-run per query.");
     }
 
     // -------------------------------------------------------------------
@@ -233,20 +238,23 @@ public class ReportPrinter {
             System.out.println("  " + BOLD + qname + RESET);
 
             // Collect all methods for this query across scenarios
-            AsciiTable t = new AsciiTable("Namespace\nscenario", "Method", "Wall ms", "CPU ms",
-                    "Rows", "Timed out?");
+            AsciiTable t = new AsciiTable("Namespace\nscenario", "Method", "Wall ms", "Rows", "Status");
             for (ScenarioResult r : results) {
                 if ("Versioned (1)".equals(r.scenarioName))
                     continue;
                 for (QueryResult q : r.queries) {
                     if (!q.name().equals(qname))
                         continue;
-                    String wallStr = String.format("%.1f", q.measurement().wallMs);
-                    String cpuStr = String.format("%.1f", q.measurement().cpuUserMs);
-                    String rows = String.valueOf(q.resultCount());
-                    String to = q.timedOut() ? RED + "YES" + RESET : "no";
+                    String wallStr = q.error() != null ? "-" : String.format("%.1f", q.measurement().wallMs);
+                    String rows = q.error() != null ? "-" : String.valueOf(q.resultCount());
+                    String status = "ok";
+                    if (q.error() != null) {
+                        status = RED + q.error() + RESET;
+                    } else if (q.timedOut()) {
+                        status = YELLOW + "timeout" + RESET;
+                    }
                     String method = methodColored(q.method());
-                    t.addRow(r.scenarioName, method, wallStr, cpuStr, rows, to);
+                    t.addRow(r.scenarioName, method, wallStr, rows, status);
                 }
             }
             t.print();
@@ -269,15 +277,17 @@ public class ReportPrinter {
         System.out.println();
         System.out.println(BOLD + "SHACL Validation Results" + RESET);
         AsciiTable t = new AsciiTable("Namespace\nscenario", "Shapes config", "Inference",
-                "Conforms?", "Violations", "Targets", "Wall ms");
+                "Conforms?", "Violations", "Targets", "Wall ms", "Status");
         for (ScenarioResult r : results) {
             if ("Versioned (1)".equals(r.scenarioName))
                 continue;
             for (ShaclResult s : r.shacl) {
-                String conforms = s.conforms() ? GREEN + "yes" + RESET : RED + "NO" + RESET;
+                String conforms = s.error() != null ? "-" : (s.conforms() ? GREEN + "yes" + RESET : RED + "NO" + RESET);
+                String wall = s.error() != null ? "-" : String.format("%.1f", s.measurement().wallMs);
+                String status = s.error() != null ? RED + s.error() + RESET : "ok";
                 t.addRow(r.scenarioName, truncate(s.name(), 45), s.inference(), conforms,
                         String.valueOf(s.violationCount()), String.valueOf(s.targetCount()),
-                        String.format("%.1f", s.measurement().wallMs));
+                        wall, status);
             }
         }
         t.print();
@@ -290,19 +300,14 @@ public class ReportPrinter {
         System.out.println();
         System.out.println(BOLD + "Summary — Overhead vs Shared Namespace" + RESET);
 
-        // Find shared namespace baseline
-        Optional<ScenarioResult> baseOpt =
-                results.stream().filter(r -> r.scenarioName.startsWith("Shared (")).findFirst();
-        if (baseOpt.isEmpty()) {
+        // Map shared baselines by version count
+        Map<Integer, ScenarioResult> baselines = results.stream()
+                .filter(r -> r.scenarioName.startsWith("Shared ("))
+                .collect(Collectors.toMap(r -> r.versionsCount, r -> r, (a, b) -> a));
+
+        if (baselines.isEmpty()) {
             System.out.println("  (no shared namespace baseline found)");
             return;
-        }
-        ScenarioResult base = baseOpt.get();
-
-        // For each query in base, build a lookup of the baseline wall time
-        Map<String, Double> baselineTime = new HashMap<>();
-        for (QueryResult q : base.queries) {
-            baselineTime.put(q.name() + "|" + q.method(), q.measurement().wallMs);
         }
 
         AsciiTable t = new AsciiTable("Namespace\nscenario", "Query", "Method", "Wall ms",
@@ -310,11 +315,23 @@ public class ReportPrinter {
         for (ScenarioResult r : results) {
             if ("Versioned (1)".equals(r.scenarioName))
                 continue;
+
+            ScenarioResult base = baselines.get(r.versionsCount);
+            if (base == null) continue;
+
+            // Build baseline lookup for this specific version count
+            Map<String, Double> baselineTime = new HashMap<>();
+            for (QueryResult q : base.queries) {
+                baselineTime.put(q.name() + "|" + q.method(), q.measurement().wallMs);
+            }
+
             for (QueryResult q : r.queries) {
                 String baseMethod = "union".equals(q.method()) ? "direct" : q.method();
                 Double baseline = baselineTime.get(q.name() + "|" + baseMethod);
                 String ratio;
-                if (baseline != null && baseline > 0) {
+                if (q.error() != null) {
+                    ratio = RED + "ERROR" + RESET;
+                } else if (baseline != null && baseline > 0) {
                     double x = q.measurement().wallMs / baseline;
                     if (r == base && x == 1.0) {
                         ratio = DIM + "baseline" + RESET;
@@ -331,8 +348,9 @@ public class ReportPrinter {
                     ratio = "-";
                 }
                 t.addRow(r.scenarioName, q.name(), methodColored(q.method()),
-                        String.format("%.1f", q.measurement().wallMs), ratio,
-                        String.valueOf(q.resultCount()));
+                        q.error() != null ? "-" : String.format("%.1f", q.measurement().wallMs), 
+                        ratio,
+                        q.error() != null ? "-" : String.valueOf(q.resultCount()));
             }
         }
         t.print();
