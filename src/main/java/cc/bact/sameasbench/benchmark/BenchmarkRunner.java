@@ -162,11 +162,12 @@ public class BenchmarkRunner {
                 // Cold start protection: run validation once and discard
                 ShaclValidator.get().validate(shapes, queryModel.getGraph());
 
+                final Model finalModel = queryModel;
                 for (int i = 0; i < repeats; i++) {
                     Measurement.MeasuredResult<ShaclIterResult> mr =
                             Measurement.measureWithResult(() -> {
                                 ValidationReport report = ShaclValidator.get().validate(shapes,
-                                        queryModel.getGraph());
+                                        finalModel.getGraph());
                                 int v = report.getEntries().size();
                                 return new ShaclIterResult(report.conforms(), v);
                             });
