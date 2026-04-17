@@ -103,7 +103,7 @@ sameas-bench-java clear-cache   # delete cached TTLs (forces re-download on next
 |---------|-----------------|
 | **Graph Statistics** | Triple counts and build time per scenario |
 | **Equivalence Breakdown** | `owl:equivalentClass` / `equivalentProperty` / `sameAs` counts |
-| **SPARQL Query Results** | `direct` vs `union` vs `owlrl+query` — wall time and row counts |
+| **SPARQL Query Results** | `direct` vs `union` vs `owlrl` — wall time and row counts |
 | **SHACL Validation** | Per-version shapes (no inference) vs canonical shapes + OWL-RL |
 | **Summary** | Overhead ratios: union and OWL-RL vs shared-namespace baseline |
 | **Computing Environment** | CPU, RAM, JVM, OS, total wall time |
@@ -116,7 +116,7 @@ sameas-bench-java clear-cache   # delete cached TTLs (forces re-download on next
 | -------- | ------------ | -------------------- |
 | `direct` | All data uses shared canonical IRI — no equivalences needed | O(1) |
 | `union` | Each version has own IRI; query has one UNION branch per version | O(N) |
-| `owlrl+query` | `owl:equivalentClass` hub graph + Backward Chaining (on-the-fly inference), then canonical query | super-linear |
+| `owlrl` | `owl:equivalentClass` hub graph + Backward Chaining (on-the-fly inference), then canonical query | super-linear |
 
 ---
 
@@ -145,9 +145,13 @@ To ensure high-fidelity measurements and minimize JVM-induced noise, the benchma
 | Aspect | Python (rdflib) | Java (Jena 6.0) |
 | ------ | --------------- | ----------- |
 | SPARQL engine | rdflib ARQ (Python) | Jena ARQ (native Java) |
-| OWL reasoning | owlrl (pure Python) | Jena OWL reasoner (built-in rule engine) |
+| OWL reasoning | owlrl (pure Python) | Jena OWL Micro reasoner (built-in rule engine) |
 | SHACL | pyshacl | jena-shacl |
 | Reasoner approach | Pre-materialization (owlrl adds all closure triples) | Backward Chaining (evaluates OWL-RL rules on-demand during query execution) |
 | Performance | Baseline | Typically 5–50× faster for large graphs |
 
-> **Optimization Note**: The Java version leverages Jena's **Backward Chaining** mechanism for the `owlrl+query` strategy. Instead of forward materializing the entire equivalence graph (which scales poorly and consumes excessive memory by pre-computing all equivalences), the inference rules are evaluated on-the-fly when evaluating the SPARQL query patterns. This drastically reduces the memory overhead and prevents timeouts during reasoning tests.
+> **Optimization note**: The Java version leverages Jena's **Backward chaining** mechanism for the `owlrl` strategy. Instead of forward materializing the entire equivalence graph (which scales poorly and consumes excessive memory by pre-computing all closure triples), the inference rules are evaluated on-the-fly when evaluating the SPARQL query patterns. This drastically reduces the memory overhead.
+>
+> **Reasoner choice**: We use the **OWL Mini** reasoner (`ReasonerRegistry.getOWLMiniReasoner()`). This provides the optimal balance for SPDX identity management—it handles `subClassOf`, `equivalentClass`, and robust `sameAs` transitive/symmetric closures while avoiding the exponential search space associated with the "Full" OWL reasoner. `OWL Mini` is preferred over `OWL Micro` here as it more reliably handles identity mapping when individuals are used in the object position of triple patterns (common in SPDX 3 relationship types). This choice specifically addresses `OutOfMemoryError` and infinite recursion issues encountered when applying full OWL rule sets to large, multi-version SPDX datasets.
+>
+> **Resilience strategy**: The benchmark runner is instrumented to catch `OutOfMemoryError` and `QueryCancelledException` (timeouts). If a specific reasoning task exceeds available resources or the 5-minute safety threshold, the system records the error with heap context and proceeds to the next scenario rather than crashing the entire suite.

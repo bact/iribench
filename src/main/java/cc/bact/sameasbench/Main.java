@@ -30,7 +30,7 @@ import java.util.*;
         "  4. Versioned N-ver   - up to 10 versions",
         "  5. Reasoner tests    - owl:equivalentClass vs rdfs:subClassOf chain",
         "",
-        "SPARQL strategies: direct / union / owlrl+query",
+        "SPARQL strategies: direct / union / owlrl",
         "SHACL: per-version shapes / canonical+OWL-RL",
         "",
         "Uses Apache Jena 6.0 (ARQ + OWL reasoner + jena-shacl).",

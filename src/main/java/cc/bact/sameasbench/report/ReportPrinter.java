@@ -144,7 +144,7 @@ public class ReportPrinter {
                 + "        All SBOMs use shared canonical IRI https://spdx.org/rdf/3/terms/");
         System.out.println("  " + YELLOW + "union" + RESET
                 + "         Each SPDX version has its own IRI prefix; queries use SPARQL UNION");
-        System.out.println("  " + CYAN + "owlrl+query" + RESET
+        System.out.println("  " + CYAN + "owlrl" + RESET
                 + "   owl:equivalentClass graph + backward chaining (on-the-fly inference), then canonical query");
         System.out.println();
         System.out.println("  " + BOLD + "Example (Counting Software instances):" + RESET);
@@ -152,7 +152,7 @@ public class ReportPrinter {
                 + "      : SELECT (COUNT(?x) AS ?c) { ?x a spdx:Software }");
         System.out.println("    " + YELLOW + "union" + RESET
                 + "       : SELECT (COUNT(?x) AS ?c) { { ?x a v301:Software } UNION { ?x a v31:Software } }");
-        System.out.println("    " + CYAN + "owlrl+query" + RESET
+        System.out.println("    " + CYAN + "owlrl" + RESET
                 + " : (Backward chain owl:equivalentClass), then SELECT ... { ?x a spdx:Software }");
         System.out.println();
         System.out.println(BOLD + "Limitations:" + RESET);
@@ -264,7 +264,7 @@ public class ReportPrinter {
                     } else {
                         rowStr = String.valueOf(q.resultCount());
                         if (baseR != null && baseR > 0 && r != base && q.resultCount() == baseR * r.versionsCount) {
-                            rowStr += "\n" + DIM + "(" + baseR + " x " + r.versionsCount + ")" + RESET;
+                            rowStr += " " + DIM + "(" + baseR + "x" + r.versionsCount + ")" + RESET;
                         }
                     }
 
@@ -288,7 +288,7 @@ public class ReportPrinter {
         return switch (method) {
             case "direct" -> GREEN + method + RESET;
             case "union" -> YELLOW + method + RESET;
-            case "owlrl+query" -> CYAN + method + RESET;
+            case "owlrl" -> CYAN + method + RESET;
             default -> DIM + method + RESET;
         };
     }
@@ -316,7 +316,7 @@ public class ReportPrinter {
             for (ShaclResult s : r.shacl) {
                 String targetStr = String.valueOf(s.targetCount());
                 if (baseT != null && baseT > 0 && r != base && s.targetCount() == baseT * r.versionsCount) {
-                    targetStr += "\n" + DIM + "(" + baseT + " x " + r.versionsCount + ")" + RESET;
+                    targetStr += " " + DIM + "(" + baseT + "x" + r.versionsCount + ")" + RESET;
                 }
 
                 String status = s.error() != null ? RED + s.error() + RESET : "ok";
@@ -396,7 +396,7 @@ public class ReportPrinter {
                 } else {
                     rowStr = String.valueOf(q.resultCount());
                     if (baseR != null && baseR > 0 && r != base && q.resultCount() == baseR * r.versionsCount) {
-                        rowStr += "\n" + DIM + "(" + baseR + " x " + r.versionsCount + ")" + RESET;
+                        rowStr += " " + DIM + "(" + baseR + "x" + r.versionsCount + ")" + RESET;
                     }
                 }
 

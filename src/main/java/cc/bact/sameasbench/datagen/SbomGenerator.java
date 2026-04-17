@@ -228,6 +228,23 @@ public class SbomGenerator {
             }
         }
 
+        // ---- Benchmark Baselines: Explicitly typed super-classes -----------
+        // These ensure that 'direct' queries (no inference) have at least 1 row
+        // as a baseline for ratio calculations.
+        Resource bArt = inst(g, docNamespace, "base-artifact");
+        g.add(bArt, RDF.type, term(g, baseIri, CLS_SW_PACKAGE)); // Also a package
+        g.add(bArt, RDF.type, term(g, baseIri, "Core/Artifact"));
+        g.add(bArt, prop(g, baseIri, P_NAME), g.createLiteral("Baseline Artifact"));
+        g.add(bArt, prop(g, baseIri, P_CREATION_INFO), ci);
+        g.add(doc, prop(g, baseIri, P_ELEMENT), bArt);
+
+        Resource bEle = inst(g, docNamespace, "base-element");
+        g.add(bEle, RDF.type, term(g, baseIri, "Core/Element"));
+        g.add(bEle, RDF.type, term(g, baseIri, "Core/Artifact")); // Also an artifact for transitivity test
+        g.add(bEle, prop(g, baseIri, P_NAME), g.createLiteral("Baseline Element"));
+        g.add(bEle, prop(g, baseIri, P_CREATION_INFO), ci);
+        g.add(doc, prop(g, baseIri, P_ELEMENT), bEle);
+
         return g;
     }
 }

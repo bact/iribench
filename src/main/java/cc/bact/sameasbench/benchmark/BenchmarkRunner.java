@@ -8,7 +8,6 @@ import org.apache.jena.rdf.model.InfModel;
 import org.apache.jena.riot.Lang;
 import org.apache.jena.riot.RDFDataMgr;
 import org.apache.jena.shacl.*;
-import org.apache.jena.shacl.validation.ReportEntry;
 import org.apache.jena.vocabulary.OWL;
 import cc.bact.sameasbench.Measurement;
 import cc.bact.sameasbench.datagen.GeneratorConfig;
@@ -22,13 +21,14 @@ import java.util.*;
 
 public class BenchmarkRunner {
 
-    // No longer using fixed timeout since backward chaining handles inference on demand
+    // Using a 5-minute safety timeout to prevent reasoner blowout on complex ontologies
 
     // -------------------------------------------------------------------
     // Internal: run SPARQL, return row count
     // -------------------------------------------------------------------
     private static int runQuery(Model model, String sparql) {
-        try (QueryExecution qe = QueryExecution.create().query(sparql).model(model).build()) {
+        try (QueryExecution qe = QueryExecution.create().query(sparql).model(model)
+                .timeout(300, java.util.concurrent.TimeUnit.SECONDS).build()) {
             ResultSet rs = qe.execSelect();
             int count = 0;
             while (rs.hasNext()) {
@@ -44,7 +44,9 @@ public class BenchmarkRunner {
     // Returns (infModel, timedOut=false)
     // -------------------------------------------------------------------
     private static ModelAndTimeout expandOwlRl(Model combinedModel) {
-        Reasoner reasoner = ReasonerRegistry.getOWLReasoner();
+        // Use Mini reasoner for a better balance of performance vs inference depth
+        // handles: subClassOf, equivalentClass, sameAs, property transitivity, etc.
+        Reasoner reasoner = ReasonerRegistry.getOWLMiniReasoner();
         InfModel inf = ModelFactory.createInfModel(reasoner, combinedModel);
         return new ModelAndTimeout(inf, false);
     }
@@ -94,6 +96,12 @@ public class BenchmarkRunner {
             }
             return new QueryResult(name, method, count, Measurement.average(measurements), false,
                     null);
+        } catch (org.apache.jena.query.QueryCancelledException te) {
+            if (verbose) {
+                System.out.print(" [TIMEOUT] ");
+                System.out.flush();
+            }
+            return new QueryResult(name, method, 0, new Measurement(300000, 0), true, null);
         } catch (Throwable t) {
             if (verbose) {
                 System.out.print(" [ERROR: " + t.getClass().getSimpleName() + "] ");
@@ -101,10 +109,10 @@ public class BenchmarkRunner {
             }
             if (t instanceof OutOfMemoryError) {
                 System.gc(); // Try to recover
-                return new QueryResult(name, method, 0, new Measurement(0, 0), false,
-                        "OOM: " + getHeapConfig());
+                return new QueryResult(name, method, 0, new Measurement(0, 0), false, "OOM");
             }
-            return new QueryResult(name, method, 0, new Measurement(0, 0), false, t.toString());
+            return new QueryResult(name, method, 0, new Measurement(), false,
+                    t.getClass().getSimpleName());
         }
     }
 
@@ -386,7 +394,7 @@ public class BenchmarkRunner {
                     System.out.printf("    [%d/%d] %s (OWL-RL) ", currentTask++, totalTasks, q[0]);
                     System.out.flush();
                 }
-                result.queries.add(benchQuery(combinedModel, q[0], "owlrl+query", q[1], repeats,
+                result.queries.add(benchQuery(combinedModel, q[0], "owlrl", q[1], repeats,
                         true, verbose));
                 if (verbose)
                     System.out.println();
@@ -467,12 +475,27 @@ public class BenchmarkRunner {
             return result;
         }
 
-        // SPARQL - UNION
+        // SPARQL - UNION (Manual multi-versioning)
         List<String[]> unionQueries = List.of(
                 new String[] {"Find packages + names", SparqlQueries.findPackagesUnion(bases)},
                 new String[] {"Packages with licenses", SparqlQueries.licensesUnion(bases)},
                 new String[] {"Dependency chain (2-hop)", SparqlQueries.depChainUnion(bases)},
                 new String[] {"Count elements by type", SparqlQueries.countByTypeUnion(bases)},
+                new String[] {"subClassOf 1-hop: ?x a Core/Artifact",
+                        SparqlQueries.subclassOneHopUnion(bases)},
+                new String[] {"subClassOf 2-hop: ?x a Core/Element",
+                        SparqlQueries.subclassTwoHopUnion(bases)},
+                new String[] {"Element + leaf type (transitivity)",
+                        SparqlQueries.superclassWithTypeUnion(bases)},
+                new String[] {"rdfs:domain: Core/from->Relationship",
+                        SparqlQueries.domainInferenceUnion(bases)});
+
+        // SPARQL - CANONICAL (Reasoner-based multi-versioning)
+        List<String[]> canonicalQueries = List.of(
+                new String[] {"Find packages + names", SparqlQueries.findPackagesDirect(sharedBase)},
+                new String[] {"Packages with licenses", SparqlQueries.licensesDirect(sharedBase)},
+                new String[] {"Dependency chain (2-hop)", SparqlQueries.depChainDirect(sharedBase)},
+                new String[] {"Count elements by type", SparqlQueries.countByTypeDirect(sharedBase)},
                 new String[] {"subClassOf 1-hop: ?x a Core/Artifact",
                         SparqlQueries.subclassTwoHop(sharedBase)},
                 new String[] {"subClassOf 2-hop: ?x a Core/Element",
@@ -482,7 +505,7 @@ public class BenchmarkRunner {
                 new String[] {"rdfs:domain: Core/from->Relationship",
                         SparqlQueries.domainInference(sharedBase)});
 
-        int totalTasks = unionQueries.size() + (owlEnabled ? unionQueries.size() : 0) + 2;
+        int totalTasks = unionQueries.size() + (owlEnabled ? canonicalQueries.size() : 0) + 2;
         int currentTask = 1;
 
         for (String[] q : unionQueries) {
@@ -495,31 +518,13 @@ public class BenchmarkRunner {
                 System.out.println();
         }
 
-        // SPARQL - OWL-RL
         if (owlEnabled) {
-            List<String[]> inferQueries = List.of(
-                    new String[] {"Find packages + names",
-                            SparqlQueries.findPackagesDirect(sharedBase)},
-                    new String[] {"Packages with licenses",
-                            SparqlQueries.licensesDirect(sharedBase)},
-                    new String[] {"Dependency chain (2-hop)",
-                            SparqlQueries.depChainDirect(sharedBase)},
-                    new String[] {"Count elements by type",
-                            SparqlQueries.countByTypeDirect(sharedBase)},
-                    new String[] {"subClassOf 1-hop: ?x a Core/Artifact",
-                            SparqlQueries.subclassTwoHop(sharedBase)},
-                    new String[] {"subClassOf 2-hop: ?x a Core/Element",
-                            SparqlQueries.superclassAll(sharedBase)},
-                    new String[] {"Element + leaf type (transitivity)",
-                            SparqlQueries.superclassWithType(sharedBase)},
-                    new String[] {"rdfs:domain: Core/from->Relationship",
-                            SparqlQueries.domainInference(sharedBase)});
-            for (String[] q : inferQueries) {
+            for (String[] q : canonicalQueries) {
                 if (verbose) {
                     System.out.printf("    [%d/%d] %s (OWL-RL) ", currentTask++, totalTasks, q[0]);
                     System.out.flush();
                 }
-                result.queries.add(benchQuery(combinedModel, q[0], "owlrl+query", q[1], repeats,
+                result.queries.add(benchQuery(combinedModel, q[0], "owlrl", q[1], repeats,
                         true, verbose));
                 if (verbose)
                     System.out.println();

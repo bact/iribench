@@ -142,7 +142,60 @@ public final class SparqlQueries {
             + "}\nGROUP BY ?type\nORDER BY DESC(?count)\n";
     }
 
-    // Reasoner queries (use canonical/shared base)
+    // --- Union variants for Reasoner-style benchmarks ---
+
+    public static String subclassOneHopUnion(List<String> bases) {
+        StringBuilder branches = new StringBuilder();
+        for (int i = 0; i < bases.size(); i++) {
+            String tag = "v" + i;
+            if (i > 0) branches.append("    UNION\n");
+            branches.append("    { ?x a ").append(tag).append("Core:Artifact . }\n");
+        }
+        return unionPrefixes(bases) + "SELECT DISTINCT ?x WHERE {\n" + branches + "}\n";
+    }
+
+    public static String subclassTwoHopUnion(List<String> bases) {
+        StringBuilder branches = new StringBuilder();
+        for (int i = 0; i < bases.size(); i++) {
+            String tag = "v" + i;
+            if (i > 0) branches.append("    UNION\n");
+            branches.append("    { ?x a ").append(tag).append("Core:Element . }\n");
+        }
+        return unionPrefixes(bases) + "SELECT DISTINCT ?x WHERE {\n" + branches + "}\n";
+    }
+
+    public static String superclassWithTypeUnion(List<String> bases) {
+        StringBuilder branches = new StringBuilder();
+        for (int i = 0; i < bases.size(); i++) {
+            String tag = "v" + i;
+            String base = bases.get(i);
+            if (i > 0) branches.append("    UNION\n");
+            branches.append("    {\n")
+                    .append("        ?x a ").append(tag).append("Core:Element ;\n")
+                    .append("           a ?concreteType .\n")
+                    .append("        FILTER(?concreteType != ").append(tag).append("Core:Element)\n")
+                    .append("        FILTER(STRSTARTS(STR(?concreteType), \"").append(base).append("\"))\n")
+                    .append("    }\n");
+        }
+        return unionPrefixes(bases)
+            + "SELECT DISTINCT ?x ?concreteType\nWHERE {\n" + branches + "}\nORDER BY ?concreteType\n";
+    }
+
+    public static String domainInferenceUnion(List<String> bases) {
+        StringBuilder branches = new StringBuilder();
+        for (int i = 0; i < bases.size(); i++) {
+            String tag = "v" + i;
+            if (i > 0) branches.append("    UNION\n");
+            branches.append("    {\n")
+                    .append("        ?x ").append(tag).append("Core:from ?target .\n")
+                    .append("        ?x a ").append(tag).append("Core:Relationship .\n")
+                    .append("    }\n");
+        }
+        return unionPrefixes(bases) + "SELECT DISTINCT ?x WHERE {\n" + branches + "}\n";
+    }
+
+    // --- Reasoner queries (use canonical/shared base) ---
+
     public static String superclassAll(String base) {
         return prefixesForBase(base, "spdx")
             + "SELECT DISTINCT ?x WHERE { ?x a spdxCore:Element . }\n";
