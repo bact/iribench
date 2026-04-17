@@ -105,10 +105,6 @@ public class BenchmarkRunner {
                         "OOM: " + getHeapConfig());
             }
             return new QueryResult(name, method, 0, new Measurement(0, 0), false, t.toString());
-        } finally {
-            if (expandOwl && targetModel != null && targetModel != model) {
-                targetModel.close();
-            }
         }
     }
 
@@ -194,11 +190,6 @@ public class BenchmarkRunner {
                 }
                 return new ShaclResult(name, inference, false, 0, 0, new Measurement(0, 0),
                         t.toString());
-            } finally {
-                // Close the inference model if one was created
-                if (inference.equals("owlrl") && queryModel != null && queryModel != dataModel) {
-                    queryModel.close();
-                }
             }
         } catch (Throwable t) {
             if (verbose) {
