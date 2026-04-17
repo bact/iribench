@@ -195,6 +195,13 @@ public class SbomGenerator {
             addRel(g, baseIri, docNamespace, doc, "describes-root", doc, pkgIris.get(0), RT_DESCRIBES, ci);
 
         // ---- Relationships: DEPENDS_ON chains ------------------------------
+        // 1. Guaranteed 2-hop chain for benchmarking if we have enough packages
+        if (pkgIris.size() >= 3) {
+            addRel(g, baseIri, docNamespace, doc, "dep-fixed-1", pkgIris.get(0), pkgIris.get(1), RT_DEPENDS_ON, ci);
+            addRel(g, baseIri, docNamespace, doc, "dep-fixed-2", pkgIris.get(1), pkgIris.get(2), RT_DEPENDS_ON, ci);
+        }
+
+        // 2. Random noise
         // Always consume 2 RNG calls per attempt regardless of self-loop skip.
         // Matches Python behaviour exactly.
         int numDeps = Math.min(config.numPackages() * 2, Math.max(pkgIris.size() - 1, 0));
