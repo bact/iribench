@@ -30,25 +30,30 @@ public class ReportPrinter {
             this.headers = headers;
             this.widths = new int[headers.length];
             for (int i = 0; i < headers.length; i++) {
-                int maxLine = 0;
-                for (String line : headers[i].split("\n", -1)) {
-                    maxLine = Math.max(maxLine, line.length());
-                }
-                widths[i] = maxLine;
+                widths[i] = getMaxLineWidth(headers[i]);
             }
         }
 
+        private int getMaxLineWidth(String cell) {
+            int max = 0;
+            if (cell == null) return 0;
+            for (String line : cell.split("\n", -1)) {
+                max = Math.max(max, stripAnsi(line).length());
+            }
+            return max;
+        }
+
         void addRow(String... cells) {
-            // Pad to correct number of columns
             String[] row = new String[headers.length];
             for (int i = 0; i < headers.length; i++) {
                 row[i] = (i < cells.length && cells[i] != null) ? cells[i] : "";
-                widths[i] = Math.max(widths[i], stripAnsi(row[i]).length());
+                widths[i] = Math.max(widths[i], getMaxLineWidth(row[i]));
             }
             rows.add(row);
         }
 
         private String stripAnsi(String s) {
+            if (s == null) return "";
             return s.replaceAll("\033\\[[\\d;]*m", "");
         }
 
@@ -62,46 +67,38 @@ public class ReportPrinter {
             return sb.toString();
         }
 
-        private String row(String[] cells) {
-            StringBuilder sb = new StringBuilder("|");
-            for (int i = 0; i < headers.length; i++) {
-                String cell = (i < cells.length && cells[i] != null) ? cells[i] : "";
-                int visLen = stripAnsi(cell).length();
-                int pad = widths[i] - visLen;
-                sb.append(' ').append(cell);
-                for (int p = 0; p < pad; p++)
-                    sb.append(' ');
-                sb.append(" |");
-            }
-            return sb.toString();
-        }
-
         void print() {
             String b = border();
             System.out.println(b);
-            // Split headers on \n
-            String[][] splitH = new String[headers.length][];
-            int maxLines = 1;
-            for (int i = 0; i < headers.length; i++) {
-                splitH[i] = headers[i].split("\n", -1);
-                maxLines = Math.max(maxLines, splitH[i].length);
+            printMultiLineRow(headers);
+            System.out.println(b);
+            for (String[] r : rows) {
+                printMultiLineRow(r);
             }
+            System.out.println(b);
+        }
+
+        private void printMultiLineRow(String[] cells) {
+            String[][] split = new String[cells.length][];
+            int maxLines = 1;
+            for (int i = 0; i < cells.length; i++) {
+                split[i] = cells[i].split("\n", -1);
+                maxLines = Math.max(maxLines, split[i].length);
+            }
+
             for (int line = 0; line < maxLines; line++) {
                 StringBuilder sb = new StringBuilder("|");
-                for (int i = 0; i < headers.length; i++) {
-                    String cell = (line < splitH[i].length) ? splitH[i][line] : "";
-                    int pad = widths[i] - cell.length();
-                    sb.append(' ').append(cell);
+                for (int i = 0; i < cells.length; i++) {
+                    String segment = (line < split[i].length) ? split[i][line] : "";
+                    int visLen = stripAnsi(segment).length();
+                    int pad = widths[i] - visLen;
+                    sb.append(' ').append(segment);
                     for (int p = 0; p < pad; p++)
                         sb.append(' ');
                     sb.append(" |");
                 }
                 System.out.println(sb);
             }
-            System.out.println(b);
-            for (String[] r : rows)
-                System.out.println(row(r));
-            System.out.println(b);
         }
     }
 
@@ -238,23 +235,49 @@ public class ReportPrinter {
             System.out.println("  " + BOLD + qname + RESET);
 
             // Collect all methods for this query across scenarios
-            AsciiTable t = new AsciiTable("Namespace\nscenario", "Method", "Wall ms", "Rows", "Status");
+            Map<Integer, ScenarioResult> baselines = results.stream()
+                    .filter(res -> res.scenarioName.startsWith("Shared ("))
+                    .collect(Collectors.toMap(res -> res.versionsCount, res -> res, (a, b) -> a));
+
+            AsciiTable t = new AsciiTable("Namespace\nscenario", "Method", "Wall\nms", "Rows", "Status");
             for (ScenarioResult r : results) {
                 if ("Versioned (1)".equals(r.scenarioName))
                     continue;
+
+                ScenarioResult base = baselines.get(r.versionsCount);
+                Map<String, Integer> baselineRows = new HashMap<>();
+                if (base != null) {
+                    for (QueryResult q : base.queries) {
+                        baselineRows.put(q.name() + "|" + q.method(), q.resultCount());
+                    }
+                }
+
                 for (QueryResult q : r.queries) {
                     if (!q.name().equals(qname))
                         continue;
-                    String wallStr = q.error() != null ? "-" : String.format("%.1f", q.measurement().wallMs);
-                    String rows = q.error() != null ? "-" : String.valueOf(q.resultCount());
+                    
+                    String baseMethod = "union".equals(q.method()) ? "direct" : q.method();
+                    Integer baseR = baselineRows.get(q.name() + "|" + baseMethod);
+                    String rowStr;
+                    if (q.error() != null) {
+                        rowStr = "-";
+                    } else {
+                        rowStr = String.valueOf(q.resultCount());
+                        if (baseR != null && baseR > 0 && r != base && q.resultCount() == baseR * r.versionsCount) {
+                            rowStr += "\n" + DIM + "(" + baseR + " x " + r.versionsCount + ")" + RESET;
+                        }
+                    }
+
                     String status = "ok";
                     if (q.error() != null) {
                         status = RED + q.error() + RESET;
                     } else if (q.timedOut()) {
                         status = YELLOW + "timeout" + RESET;
                     }
-                    String method = methodColored(q.method());
-                    t.addRow(r.scenarioName, method, wallStr, rows, status);
+
+                    t.addRow(r.scenarioName, methodColored(q.method()),
+                            q.error() != null ? "-" : String.format("%.1f", q.measurement().wallMs),
+                            rowStr, status);
                 }
             }
             t.print();
@@ -276,18 +299,33 @@ public class ReportPrinter {
     private static void printShaclResults(List<ScenarioResult> results) {
         System.out.println();
         System.out.println(BOLD + "SHACL Validation Results" + RESET);
+        
+        Map<Integer, ScenarioResult> baselines = results.stream()
+                .filter(r -> r.scenarioName.startsWith("Shared ("))
+                .collect(Collectors.toMap(r -> r.versionsCount, r -> r, (a, b) -> a));
+
         AsciiTable t = new AsciiTable("Namespace\nscenario", "Shapes config", "Inference",
-                "Conforms?", "Violations", "Targets", "Wall ms", "Status");
+                "Conforms?", "Violations", "Targets", "Wall\nms", "Status");
         for (ScenarioResult r : results) {
             if ("Versioned (1)".equals(r.scenarioName))
                 continue;
+            
+            ScenarioResult base = baselines.get(r.versionsCount);
+            Integer baseT = (base != null && !base.shacl.isEmpty()) ? base.shacl.get(0).targetCount() : null;
+
             for (ShaclResult s : r.shacl) {
-                String conforms = s.error() != null ? "-" : (s.conforms() ? GREEN + "yes" + RESET : RED + "NO" + RESET);
-                String wall = s.error() != null ? "-" : String.format("%.1f", s.measurement().wallMs);
+                String targetStr = String.valueOf(s.targetCount());
+                if (baseT != null && baseT > 0 && r != base && s.targetCount() == baseT * r.versionsCount) {
+                    targetStr += "\n" + DIM + "(" + baseT + " x " + r.versionsCount + ")" + RESET;
+                }
+
                 String status = s.error() != null ? RED + s.error() + RESET : "ok";
-                t.addRow(r.scenarioName, truncate(s.name(), 45), s.inference(), conforms,
-                        String.valueOf(s.violationCount()), String.valueOf(s.targetCount()),
-                        wall, status);
+                t.addRow(r.scenarioName, truncate(s.name(), 45), s.inference(), 
+                        s.error() != null ? "-" : (s.conforms() ? GREEN + "yes" + RESET : RED + "NO" + RESET),
+                        s.error() != null ? "-" : String.valueOf(s.violationCount()), 
+                        targetStr,
+                        s.error() != null ? "-" : String.format("%.1f", s.measurement().wallMs), 
+                        status);
             }
         }
         t.print();
@@ -310,8 +348,8 @@ public class ReportPrinter {
             return;
         }
 
-        AsciiTable t = new AsciiTable("Namespace\nscenario", "Query", "Method", "Wall ms",
-                "vs. baseline (x)", "Rows");
+        AsciiTable t = new AsciiTable("Namespace\nscenario", "Query", "Method", "Wall\nms",
+                "vs.\nbaseline", "Rows");
         for (ScenarioResult r : results) {
             if ("Versioned (1)".equals(r.scenarioName))
                 continue;
@@ -321,18 +359,22 @@ public class ReportPrinter {
 
             // Build baseline lookup for this specific version count
             Map<String, Double> baselineTime = new HashMap<>();
+            Map<String, Integer> baselineRows = new HashMap<>();
             for (QueryResult q : base.queries) {
                 baselineTime.put(q.name() + "|" + q.method(), q.measurement().wallMs);
+                baselineRows.put(q.name() + "|" + q.method(), q.resultCount());
             }
 
             for (QueryResult q : r.queries) {
                 String baseMethod = "union".equals(q.method()) ? "direct" : q.method();
-                Double baseline = baselineTime.get(q.name() + "|" + baseMethod);
+                Double baselineT = baselineTime.get(q.name() + "|" + baseMethod);
+                Integer baseR = baselineRows.get(q.name() + "|" + baseMethod);
+
                 String ratio;
                 if (q.error() != null) {
                     ratio = RED + "ERROR" + RESET;
-                } else if (baseline != null && baseline > 0) {
-                    double x = q.measurement().wallMs / baseline;
+                } else if (baselineT != null && baselineT > 0) {
+                    double x = q.measurement().wallMs / baselineT;
                     if (r == base && x == 1.0) {
                         ratio = DIM + "baseline" + RESET;
                     } else {
@@ -347,10 +389,21 @@ public class ReportPrinter {
                 } else {
                     ratio = "-";
                 }
+
+                String rowStr;
+                if (q.error() != null) {
+                    rowStr = "-";
+                } else {
+                    rowStr = String.valueOf(q.resultCount());
+                    if (baseR != null && baseR > 0 && r != base && q.resultCount() == baseR * r.versionsCount) {
+                        rowStr += "\n" + DIM + "(" + baseR + " x " + r.versionsCount + ")" + RESET;
+                    }
+                }
+
                 t.addRow(r.scenarioName, q.name(), methodColored(q.method()),
                         q.error() != null ? "-" : String.format("%.1f", q.measurement().wallMs), 
                         ratio,
-                        q.error() != null ? "-" : String.valueOf(q.resultCount()));
+                        rowStr);
             }
         }
         t.print();
