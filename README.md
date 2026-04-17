@@ -106,7 +106,6 @@ sameas-bench-java clear-cache   # delete cached TTLs (forces re-download on next
 | **SPARQL Query Results** | `direct` vs `union` vs `owlrl+query` — wall time and row counts |
 | **SHACL Validation** | Per-version shapes (no inference) vs canonical shapes + OWL-RL |
 | **Summary** | Overhead ratios: union and OWL-RL vs shared-namespace baseline |
-| **Reasoner Tests** | Four graph configs isolating `equivalentClass` × `subClassOf` effects |
 | **Computing Environment** | CPU, RAM, JVM, OS, total wall time |
 
 ---
@@ -117,23 +116,7 @@ sameas-bench-java clear-cache   # delete cached TTLs (forces re-download on next
 | -------- | ------------ | -------------------- |
 | `direct` | All data uses shared canonical IRI — no equivalences needed | O(1) |
 | `union` | Each version has own IRI; query has one UNION branch per version | O(N) |
-| `owlrl+query` | `owl:equivalentClass` hub graph + Jena OWL-RL materialization, then canonical query | super-linear |
-
----
-
-## Reasoner test — key result
-
-Four graph configurations isolate the effect of each OWL mechanism:
-
-```text
-A. versioned data only            →  0 results
-B. + rdfs:subClassOf ontology     →  0 results  (versioned types not mapped)
-C. + owl:equivalentClass only     →  0 results  (no superclass chain)
-D. + both (equiv + subClassOf)    →  ✓ results  (full chain fires)
-```
-
-`SELECT ?x WHERE { ?x a canonical:Element }` returns non-zero rows **only** when
-both `owl:equivalentClass` and `rdfs:subClassOf` axioms are present.
+| `owlrl+query` | `owl:equivalentClass` hub graph + Backward Chaining (on-the-fly inference), then canonical query | super-linear |
 
 ---
 
@@ -153,5 +136,7 @@ java -jar target/sameas-bench.jar smoke        # run directly
 | SPARQL engine | rdflib ARQ (Python) | Jena ARQ (native Java) |
 | OWL reasoning | owlrl (pure Python) | Jena OWL reasoner (built-in rule engine) |
 | SHACL | pyshacl | jena-shacl |
-| Reasoner approach | Pre-materialization (owlrl adds all closure triples) | Materialization by copying `InfModel` to plain `Model` |
+| Reasoner approach | Pre-materialization (owlrl adds all closure triples) | Backward Chaining (evaluates OWL-RL rules on-demand during query execution) |
 | Performance | Baseline | Typically 5–50× faster for large graphs |
+
+> **Optimization Note**: The Java version leverages Jena's **Backward Chaining** mechanism for the `owlrl+query` strategy. Instead of forward materializing the entire equivalence graph (which scales poorly and consumes excessive memory by pre-computing all equivalences), the inference rules are evaluated on-the-fly when evaluating the SPARQL query patterns. This drastically reduces the memory overhead and prevents timeouts during reasoning tests.

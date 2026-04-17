@@ -19,11 +19,10 @@ import cc.bact.sameasbench.ontology.OntologyVersion;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.concurrent.*;
 
 public class BenchmarkRunner {
 
-    public static final long OWLRL_TIMEOUT_MS = 120_000L;
+    // No longer using fixed timeout since backward chaining handles inference on demand
 
     // -------------------------------------------------------------------
     // Internal: run SPARQL, return row count
@@ -41,25 +40,13 @@ public class BenchmarkRunner {
     }
 
     // -------------------------------------------------------------------
-    // Internal: materialize OWL-RL closure
-    // Returns (materializedModel, timedOut)
+    // Internal: configure OWL-RL backward chaining
+    // Returns (infModel, timedOut=false)
     // -------------------------------------------------------------------
     private static ModelAndTimeout expandOwlRl(Model combinedModel) {
-        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            Future<Model> future = executor.submit(() -> {
-                Reasoner reasoner = ReasonerRegistry.getOWLReasoner();
-                InfModel inf = ModelFactory.createInfModel(reasoner, combinedModel);
-                Model mat = ModelFactory.createDefaultModel();
-                mat.add(inf);
-                return mat;
-            });
-            Model mat = future.get(OWLRL_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-            return new ModelAndTimeout(mat, false);
-        } catch (TimeoutException e) {
-            return new ModelAndTimeout(combinedModel, true);
-        } catch (Exception e) {
-            throw new RuntimeException("OWL-RL expansion failed: " + e.getMessage(), e);
-        }
+        Reasoner reasoner = ReasonerRegistry.getOWLReasoner();
+        InfModel inf = ModelFactory.createInfModel(reasoner, combinedModel);
+        return new ModelAndTimeout(inf, false);
     }
 
     record ModelAndTimeout(Model model, boolean timedOut) {
@@ -234,8 +221,33 @@ public class BenchmarkRunner {
     // -------------------------------------------------------------------
     // Scenario 1: Shared namespace
     // -------------------------------------------------------------------
+    private static Model makeCanonicalOntology(OntologyVersion ov, String canonicalBase) {
+        Model canonicalModel = ModelFactory.createDefaultModel();
+        String oldBase = ov.baseIri();
+        StmtIterator iter = ov.graph().listStatements();
+        while (iter.hasNext()) {
+            Statement stmt = iter.next();
+            Resource s = stmt.getSubject();
+            Property p = stmt.getPredicate();
+            RDFNode o = stmt.getObject();
+
+            Resource newS = s.isURIResource() && s.getURI().startsWith(oldBase) 
+                ? canonicalModel.createResource(canonicalBase + s.getURI().substring(oldBase.length())) 
+                : s;
+            Property newP = p.getURI().startsWith(oldBase)
+                ? canonicalModel.createProperty(canonicalBase + p.getURI().substring(oldBase.length()))
+                : p;
+            RDFNode newO = o;
+            if (o.isURIResource() && o.asResource().getURI().startsWith(oldBase)) {
+                newO = canonicalModel.createResource(canonicalBase + o.asResource().getURI().substring(oldBase.length()));
+            }
+            canonicalModel.add(newS, newP, newO);
+        }
+        return canonicalModel;
+    }
+
     public static ScenarioResult runSharedNamespace(Map<String, OntologyVersion> versions,
-            String sharedBase, int pkgPerVersion, int repeats, boolean verbose) throws Exception {
+            String sharedBase, int pkgPerVersion, int repeats, boolean verbose, boolean owlEnabled) throws Exception {
 
         if (verbose)
             System.out.println("  Building shared-namespace data graph ...");
@@ -256,6 +268,13 @@ public class BenchmarkRunner {
         Model dataModel = built.value();
         Measurement buildM = built.measurement();
 
+        OntologyVersion firstOv = versions.values().iterator().next();
+        Model canonicalOntoG = makeCanonicalOntology(firstOv, sharedBase);
+
+        Model combinedModel = ModelFactory.createDefaultModel();
+        combinedModel.add(dataModel);
+        combinedModel.add(canonicalOntoG);
+
         ScenarioResult result = new ScenarioResult();
         result.scenarioName = "Shared (" + versions.size() + ")";
         result.versionsCount = versions.size();
@@ -265,13 +284,17 @@ public class BenchmarkRunner {
         result.buildMeasurement = buildM;
 
         List<String[]> queries = List.of(
-                new String[] {"Find packages + names",
-                        SparqlQueries.findPackagesDirect(sharedBase)},
+                new String[] {"Find packages + names", SparqlQueries.findPackagesDirect(sharedBase)},
                 new String[] {"Packages with licenses", SparqlQueries.licensesDirect(sharedBase)},
                 new String[] {"Dependency chain (2-hop)", SparqlQueries.depChainDirect(sharedBase)},
-                new String[] {"Count elements by type",
-                        SparqlQueries.countByTypeDirect(sharedBase)});
-        int totalTasks = queries.size() + 1;
+                new String[] {"Count elements by type", SparqlQueries.countByTypeDirect(sharedBase)},
+                new String[] {"subClassOf 1-hop: ?x a Core/Artifact", SparqlQueries.subclassTwoHop(sharedBase)},
+                new String[] {"subClassOf 2-hop: ?x a Core/Element", SparqlQueries.superclassAll(sharedBase)},
+                new String[] {"Element + leaf type (transitivity)", SparqlQueries.superclassWithType(sharedBase)},
+                new String[] {"rdfs:domain: Core/from->Relationship", SparqlQueries.domainInference(sharedBase)}
+        );
+
+        int totalTasks = queries.size() + (owlEnabled ? queries.size() : 0) + 1;
         int currentTask = 1;
 
         for (String[] q : queries) {
@@ -279,10 +302,21 @@ public class BenchmarkRunner {
                 System.out.printf("    [%d/%d] %s ", currentTask++, totalTasks, q[0]);
                 System.out.flush();
             }
-            result.queries
-                    .add(benchQuery(dataModel, q[0], "direct", q[1], repeats, false, verbose));
+            result.queries.add(benchQuery(dataModel, q[0], "direct", q[1], repeats, false, verbose));
             if (verbose)
                 System.out.println();
+        }
+
+        if (owlEnabled) {
+            for (String[] q : queries) {
+                if (verbose) {
+                    System.out.printf("    [%d/%d] %s (OWL-RL) ", currentTask++, totalTasks, q[0]);
+                    System.out.flush();
+                }
+                result.queries.add(benchQuery(combinedModel, q[0], "owlrl+query", q[1], repeats, true, verbose));
+                if (verbose)
+                    System.out.println();
+            }
         }
 
         String shapesTtl = ShaclShapes.makeShapes(sharedBase);
@@ -338,6 +372,9 @@ public class BenchmarkRunner {
         Model combinedModel = ModelFactory.createDefaultModel();
         combinedModel.add(dataModel);
         combinedModel.add(equivModel);
+        for (OntologyVersion ov : versions.values()) {
+            combinedModel.add(ov.graph());
+        }
 
         ScenarioResult result = new ScenarioResult();
         result.scenarioName = scenarioName;
@@ -350,7 +387,8 @@ public class BenchmarkRunner {
 
         if (versionsList.size() == 1) {
             if (verbose) {
-                System.out.println("    (Skipping query benchmark for 1-version scenario to save resources)");
+                System.out.println(
+                        "    (Skipping query benchmark for 1-version scenario to save resources)");
             }
             return result;
         }
@@ -360,9 +398,14 @@ public class BenchmarkRunner {
                 new String[] {"Find packages + names", SparqlQueries.findPackagesUnion(bases)},
                 new String[] {"Packages with licenses", SparqlQueries.licensesUnion(bases)},
                 new String[] {"Dependency chain (2-hop)", SparqlQueries.depChainUnion(bases)},
-                new String[] {"Count elements by type", SparqlQueries.countByTypeUnion(bases)});
+                new String[] {"Count elements by type", SparqlQueries.countByTypeUnion(bases)},
+                new String[] {"subClassOf 1-hop: ?x a Core/Artifact", SparqlQueries.subclassTwoHop(sharedBase)},
+                new String[] {"subClassOf 2-hop: ?x a Core/Element", SparqlQueries.superclassAll(sharedBase)},
+                new String[] {"Element + leaf type (transitivity)", SparqlQueries.superclassWithType(sharedBase)},
+                new String[] {"rdfs:domain: Core/from->Relationship", SparqlQueries.domainInference(sharedBase)}
+        );
 
-        int totalTasks = unionQueries.size() + (owlEnabled ? 4 : 0) + 2;
+        int totalTasks = unionQueries.size() + (owlEnabled ? unionQueries.size() : 0) + 2;
         int currentTask = 1;
 
         for (String[] q : unionQueries) {
@@ -378,14 +421,15 @@ public class BenchmarkRunner {
         // SPARQL - OWL-RL
         if (owlEnabled) {
             List<String[]> inferQueries = List.of(
-                    new String[] {"Find packages + names",
-                            SparqlQueries.findPackagesDirect(sharedBase)},
-                    new String[] {"Packages with licenses",
-                            SparqlQueries.licensesDirect(sharedBase)},
-                    new String[] {"Dependency chain (2-hop)",
-                            SparqlQueries.depChainDirect(sharedBase)},
-                    new String[] {"Count elements by type",
-                            SparqlQueries.countByTypeDirect(sharedBase)});
+                    new String[] {"Find packages + names", SparqlQueries.findPackagesDirect(sharedBase)},
+                    new String[] {"Packages with licenses", SparqlQueries.licensesDirect(sharedBase)},
+                    new String[] {"Dependency chain (2-hop)", SparqlQueries.depChainDirect(sharedBase)},
+                    new String[] {"Count elements by type", SparqlQueries.countByTypeDirect(sharedBase)},
+                    new String[] {"subClassOf 1-hop: ?x a Core/Artifact", SparqlQueries.subclassTwoHop(sharedBase)},
+                    new String[] {"subClassOf 2-hop: ?x a Core/Element", SparqlQueries.superclassAll(sharedBase)},
+                    new String[] {"Element + leaf type (transitivity)", SparqlQueries.superclassWithType(sharedBase)},
+                    new String[] {"rdfs:domain: Core/from->Relationship", SparqlQueries.domainInference(sharedBase)}
+            );
             for (String[] q : inferQueries) {
                 if (verbose) {
                     System.out.printf("    [%d/%d] %s (OWL-RL) ", currentTask++, totalTasks, q[0]);
@@ -431,111 +475,6 @@ public class BenchmarkRunner {
     }
 
     // -------------------------------------------------------------------
-    // Scenario 4: Reasoner inference tests
-    // -------------------------------------------------------------------
-    public static List<ScenarioResult> runReasonerTests(Map<String, OntologyVersion> versions,
-            String sharedBase, int pkgPerVersion, int repeats, boolean verbose, boolean owlEnabled)
-            throws Exception {
-
-        if (versions.isEmpty())
-            return List.of();
-        List<Map.Entry<String, OntologyVersion>> entries = new ArrayList<>(versions.entrySet());
-        Map<String, OntologyVersion> twoV = new LinkedHashMap<>();
-        int n = Math.min(2, entries.size());
-        for (int i = 0; i < n; i++)
-            twoV.put(entries.get(i).getKey(), entries.get(i).getValue());
-        OntologyVersion firstOv = twoV.values().iterator().next();
-        List<String> vList = new ArrayList<>(twoV.keySet());
-        List<String> basesVersioned = new ArrayList<>();
-        for (OntologyVersion ov : twoV.values())
-            basesVersioned.add(ov.baseIri());
-
-        if (verbose)
-            System.out.println("  Building reasoner-test graphs ...");
-
-        record DataAndEquiv(Model dataModel, Model equivModel) {
-        }
-        Measurement.MeasuredResult<DataAndEquiv> built = Measurement.measureWithResult(() -> {
-            Model dg = ModelFactory.createDefaultModel();
-            for (int i = 0; i < vList.size(); i++) {
-                dg.add(SbomGenerator.generate(basesVersioned.get(i),
-                        "https://example.org/sbom/reasoner/" + vList.get(i) + "/",
-                        new GeneratorConfig(pkgPerVersion, i + 200)));
-            }
-            Model eg = ModelFactory.createDefaultModel();
-            eg.add(EquivGraphBuilder.build(twoV, sharedBase));
-            return new DataAndEquiv(dg, eg);
-        });
-        Model dataG = built.value().dataModel();
-        Model equivG = built.value().equivModel();
-        Measurement buildM = built.measurement();
-        Model ontoG = firstOv.graph();
-
-        String[] testQueryNames = {"subClassOf 2-hop: ?x a Core/Element",
-                "subClassOf 1-hop: ?x a Core/Artifact", "Element + leaf type (transitivity)",
-                "rdfs:domain: Core/from->Relationship"};
-        String[] testQuerySparqls =
-                {SparqlQueries.superclassAll(sharedBase), SparqlQueries.subclassTwoHop(sharedBase),
-                        SparqlQueries.superclassWithType(sharedBase),
-                        SparqlQueries.domainInference(sharedBase)};
-
-        long ontoSize = ontoG.size();
-        long equivSize = equivG.size();
-
-        Model dataAndOnto = ModelFactory.createDefaultModel();
-        dataAndOnto.add(dataG);
-        dataAndOnto.add(ontoG);
-        Model dataAndEquiv = ModelFactory.createDefaultModel();
-        dataAndEquiv.add(dataG);
-        dataAndEquiv.add(equivG);
-        Model full = ModelFactory.createDefaultModel();
-        full.add(dataG);
-        full.add(equivG);
-        full.add(ontoG);
-
-        String[][] scenarioConfigs = {{"Reasoner - versioned data only (baseline)", "direct"},
-                {"Reasoner - versioned + subClassOf ontology (no equiv)", "owlrl+onto"},
-                {"Reasoner - versioned + equiv only (no subClassOf)", "owlrl+equiv"},
-                {"Reasoner - versioned + equiv + subClassOf (full chain)", "owlrl+full"}};
-        Model[] scenarioModels = {dataG, dataAndOnto, dataAndEquiv, full};
-        long[] extraTriples = {0L, ontoSize, equivSize, equivSize + ontoSize};
-
-        List<ScenarioResult> results = new ArrayList<>();
-        for (int s = 0; s < 4; s++) {
-            ScenarioResult sr = new ScenarioResult();
-            sr.scenarioName = scenarioConfigs[s][0];
-            sr.versionsCount = twoV.size();
-            sr.dataTriples = dataG.size();
-            sr.equivTriples = extraTriples[s];
-            sr.totalTriples = dataG.size() + extraTriples[s];
-            sr.buildMeasurement = buildM;
-            String method = scenarioConfigs[s][1];
-            boolean expand = !method.equals("direct");
-            if (owlEnabled) {
-                Model model = scenarioModels[s];
-                int totalTasks = testQueryNames.length;
-                int currentTask = 1;
-                if (verbose) {
-                    System.out.println("    " + sr.scenarioName);
-                }
-                for (int qi = 0; qi < testQueryNames.length; qi++) {
-                    if (verbose) {
-                        System.out.printf("      [%d/%d] %s ", currentTask++, totalTasks,
-                                testQueryNames[qi]);
-                        System.out.flush();
-                    }
-                    sr.queries.add(benchQuery(model, testQueryNames[qi], method,
-                            testQuerySparqls[qi], repeats, expand, verbose));
-                    if (verbose)
-                        System.out.println();
-                }
-            }
-            results.add(sr);
-        }
-        return results;
-    }
-
-    // -------------------------------------------------------------------
     // Top-level entry point
     // -------------------------------------------------------------------
     public static List<ScenarioResult> runAll(Map<String, OntologyVersion> versions,
@@ -549,14 +488,14 @@ public class BenchmarkRunner {
             System.out.println("  Warming up JVM + Jena engines ...");
         warmup(sharedBase, owlEnabled);
 
-        int totalScenarios = 1 + (allV.size() >= 2 ? 3 : 0) + (allV.size() > 2 ? 1 : 0);
+        int totalScenarios = allV.size() > 2 ? 4 : 3;
         int currentScenario = 1;
 
         // Scenario 1
         if (verbose)
             System.out.printf("%n[Scenario %d/%d] Shared namespace (%d versions, canonical IRI)%n",
                     currentScenario++, totalScenarios, allV.size());
-        results.add(runSharedNamespace(versions, sharedBase, pkgPerVersion, repeats, verbose));
+        results.add(runSharedNamespace(versions, sharedBase, pkgPerVersion, repeats, verbose, owlEnabled));
 
         if (allV.size() < 2) {
             if (verbose)
@@ -593,13 +532,7 @@ public class BenchmarkRunner {
                     "Versioned (" + allV.size() + ")", owlEnabled));
         }
 
-        // Scenario 5: reasoner tests
-        if (verbose)
-            System.out.printf(
-                    "\n[Scenario %d/%d] Reasoner inference tests (equiv + subClassOf chain)%n",
-                    currentScenario++, totalScenarios);
-        results.addAll(runReasonerTests(versions, sharedBase, pkgPerVersion, repeats, verbose,
-                owlEnabled));
+
 
         return results;
     }
