@@ -82,7 +82,7 @@ Downloads SPDX 3.0.1 and 3.1 TTLs on first run (cached afterward).
 ### `run` — full benchmark
 
 ```bash
-sameas-bench-java run                     # 5 versions, 20 packages, 3 repeats
+sameas-bench-java run                     # 3 versions, 10 packages, 3 repeats
 sameas-bench-java run --versions 3        # fewer versions
 sameas-bench-java run --packages 50       # more packages (slower)
 sameas-bench-java run --no-owlrl          # skip OWL-RL (much faster)
@@ -100,7 +100,7 @@ sameas-bench-java clear-cache   # delete cached TTLs (forces re-download on next
 ## What the report shows
 
 | Section | What it measures |
-|---------|-----------------|
+| ------- | ---------------- |
 | **Graph Statistics** | Triple counts and build time per scenario |
 | **Equivalence Breakdown** | `owl:equivalentClass` / `equivalentProperty` / `sameAs` counts |
 | **SPARQL Query Results** | `direct` vs `union` vs `owlrl` — wall time and row counts |

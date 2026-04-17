@@ -58,10 +58,10 @@ public class Main implements Runnable {
     @Command(name = "run", description = "Full benchmark using real SPDX ontologies (downloads on first run).",
              mixinStandardHelpOptions = true)
     static class RunCmd implements Runnable {
-        @Option(names = {"-n","--versions"}, defaultValue = "5", showDefaultValue = Help.Visibility.ALWAYS,
+        @Option(names = {"-n","--versions"}, defaultValue = "3", showDefaultValue = Help.Visibility.ALWAYS,
                 description = "Number of ontology versions (1-10). First 2 are real SPDX TTLs.")
         int versions;
-        @Option(names = {"-p","--packages"}, defaultValue = "20", showDefaultValue = Help.Visibility.ALWAYS,
+        @Option(names = {"-p","--packages"}, defaultValue = "10", showDefaultValue = Help.Visibility.ALWAYS,
                 description = "Packages generated per ontology version.")
         int packages;
         @Option(names = {"-r","--repeats"}, defaultValue = "3", showDefaultValue = Help.Visibility.ALWAYS,
