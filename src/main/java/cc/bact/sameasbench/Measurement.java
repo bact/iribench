@@ -9,6 +9,13 @@ public class Measurement {
     public double cpuUserMs;   // thread CPU time (user+sys combined in JVM)
     public double peakMemoryMb;
 
+    public Measurement() {}
+
+    public Measurement(double wallMs, double cpuUserMs) {
+        this.wallMs = wallMs;
+        this.cpuUserMs = cpuUserMs;
+    }
+
     public static Measurement average(List<Measurement> list) {
         if (list.isEmpty()) return new Measurement();
         Measurement avg = new Measurement();
