@@ -137,6 +137,7 @@ To ensure high-fidelity measurements and minimize JVM-induced noise, the benchma
 2. **Cold-start protection**: Within each scenario, every distinct SPARQL query and SHACL validation is executed once (unmeasured) before the timing repeats start. This isolates the execution performance from the initial parsing and planning phase.
 3. **Preemptive garbage collection**: `System.gc()` is explicitly invoked before each scenario block begins. This clears out models and triples from previous scenarios, ensuring that each benchmark starts with a clean heap and reducing the likelihood of a major GC pause during measurement.
 4. **Inference engine reuse**: For reasoning scenarios, the `InfModel` is expanded once outside the measurement loop. This allows us to measure the "hot" performance of the backward-chaining engine rather than the one-time rule setup overhead.
+5. **Resource cleanup**: Temporary inference models (`InfModel`) are explicitly closed after each task. This detaches the reasoner and releases internal rule-engine buffers, preventing memory leakage between tests.
 
 ---
 

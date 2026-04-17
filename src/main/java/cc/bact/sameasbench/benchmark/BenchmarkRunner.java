@@ -68,8 +68,9 @@ public class BenchmarkRunner {
     // -------------------------------------------------------------------
     private static QueryResult benchQuery(Model model, String name, String method, String sparql,
             int repeats, boolean expandOwl, boolean verbose) {
+        Model targetModel = null;
         try {
-            Model targetModel = model;
+            targetModel = model;
             if (expandOwl) {
                 targetModel = expandOwlRl(model).model();
             }
@@ -82,7 +83,8 @@ public class BenchmarkRunner {
             int count = 0;
             for (int i = 0; i < repeats; i++) {
                 final Model finalModel = targetModel;
-                Measurement.MeasuredResult<Integer> mr = Measurement.measureWithResult(() -> runQuery(finalModel, sparql));
+                Measurement.MeasuredResult<Integer> mr =
+                        Measurement.measureWithResult(() -> runQuery(finalModel, sparql));
                 if (verbose) {
                     System.out.print(".");
                     System.out.flush();
@@ -90,7 +92,8 @@ public class BenchmarkRunner {
                 measurements.add(mr.measurement());
                 count = mr.value();
             }
-            return new QueryResult(name, method, count, Measurement.average(measurements), false, null);
+            return new QueryResult(name, method, count, Measurement.average(measurements), false,
+                    null);
         } catch (Throwable t) {
             if (verbose) {
                 System.out.print(" [ERROR: " + t.getClass().getSimpleName() + "] ");
@@ -98,9 +101,14 @@ public class BenchmarkRunner {
             }
             if (t instanceof OutOfMemoryError) {
                 System.gc(); // Try to recover
-                return new QueryResult(name, method, 0, new Measurement(0, 0), false, "OOM: " + getHeapConfig());
+                return new QueryResult(name, method, 0, new Measurement(0, 0), false,
+                        "OOM: " + getHeapConfig());
             }
             return new QueryResult(name, method, 0, new Measurement(0, 0), false, t.toString());
+        } finally {
+            if (expandOwl && targetModel != null && targetModel != model) {
+                targetModel.close();
+            }
         }
     }
 
@@ -118,17 +126,20 @@ public class BenchmarkRunner {
             // Compute target count (query data model for instances of each sh:targetClass)
             Model shapesModel = ModelFactory.createDefaultModel();
             RDFDataMgr.read(shapesModel,
-                    new ByteArrayInputStream(shapesTtl.getBytes(StandardCharsets.UTF_8)), Lang.TURTLE);
+                    new ByteArrayInputStream(shapesTtl.getBytes(StandardCharsets.UTF_8)),
+                    Lang.TURTLE);
             Property targetClassProp =
                     shapesModel.createProperty("http://www.w3.org/ns/shacl#targetClass");
             Set<String> targetClassUris = new HashSet<>();
-            shapesModel.listStatements(null, targetClassProp, (RDFNode) null).forEachRemaining(s -> {
-                if (s.getObject().isURIResource())
-                    targetClassUris.add(s.getObject().asResource().getURI());
-            });
+            shapesModel.listStatements(null, targetClassProp, (RDFNode) null)
+                    .forEachRemaining(s -> {
+                        if (s.getObject().isURIResource())
+                            targetClassUris.add(s.getObject().asResource().getURI());
+                    });
             for (String tc : targetClassUris) {
                 String q = "SELECT DISTINCT ?x WHERE { ?x a <" + tc + "> }";
-                try (QueryExecution qe = QueryExecution.create().query(q).model(dataModel).build()) {
+                try (QueryExecution qe =
+                        QueryExecution.create().query(q).model(dataModel).build()) {
                     ResultSet rs = qe.execSelect();
                     while (rs.hasNext()) {
                         rs.nextSolution();
@@ -137,33 +148,57 @@ public class BenchmarkRunner {
                 }
             }
 
-            Model queryModel = inference.equals("owlrl") ? expandOwlRl(dataModel).model() : dataModel;
-            
-            // Parse shapes once outside the measurement loop
-            Model sm = ModelFactory.createDefaultModel();
-            RDFDataMgr.read(sm, new ByteArrayInputStream(shapesTtl.getBytes(StandardCharsets.UTF_8)), Lang.TURTLE);
-            Shapes shapes = Shapes.parse(sm);
+            Model queryModel = null;
+            try {
+                queryModel = inference.equals("owlrl") ? expandOwlRl(dataModel).model() : dataModel;
 
-            // Cold start protection: run validation once and discard
-            ShaclValidator.get().validate(shapes, queryModel.getGraph());
+                // Parse shapes once outside the measurement loop
+                Model sm = ModelFactory.createDefaultModel();
+                RDFDataMgr.read(sm,
+                        new ByteArrayInputStream(shapesTtl.getBytes(StandardCharsets.UTF_8)),
+                        Lang.TURTLE);
+                Shapes shapes = Shapes.parse(sm);
 
-            for (int i = 0; i < repeats; i++) {
-                Measurement.MeasuredResult<ShaclIterResult> mr = Measurement.measureWithResult(() -> {
-                    ValidationReport report = ShaclValidator.get().validate(shapes, queryModel.getGraph());
-                    int v = report.getEntries().size();
-                    return new ShaclIterResult(report.conforms(), v);
-                });
+                // Cold start protection: run validation once and discard
+                ShaclValidator.get().validate(shapes, queryModel.getGraph());
+
+                for (int i = 0; i < repeats; i++) {
+                    Measurement.MeasuredResult<ShaclIterResult> mr =
+                            Measurement.measureWithResult(() -> {
+                                ValidationReport report = ShaclValidator.get().validate(shapes,
+                                        queryModel.getGraph());
+                                int v = report.getEntries().size();
+                                return new ShaclIterResult(report.conforms(), v);
+                            });
+                    if (verbose) {
+                        System.out.print(".");
+                        System.out.flush();
+                    }
+                    measurements.add(mr.measurement());
+                    conforms = mr.value().conforms();
+                    violations = mr.value().violations();
+                }
+
+                return new ShaclResult(name, inference, conforms, violations, targetCount,
+                        Measurement.average(measurements), null);
+            } catch (Throwable t) {
                 if (verbose) {
-                    System.out.print(".");
+                    System.out.print(" [ERROR: " + t.getClass().getSimpleName() + "] ");
                     System.out.flush();
                 }
-                measurements.add(mr.measurement());
-                conforms = mr.value().conforms();
-                violations = mr.value().violations();
+                if (t instanceof OutOfMemoryError) {
+                    System.gc();
+                    return new ShaclResult(name, inference, false, 0, 0, new Measurement(0, 0),
+                            "OOM: " + getHeapConfig());
+                }
+                return new ShaclResult(name, inference, false, 0, 0, new Measurement(0, 0),
+                        t.toString());
+            } finally {
+                // Close the inference model if one was created
+                if (inference.equals("owlrl") && queryModel != null && queryModel != dataModel) {
+                    queryModel.close();
+                }
             }
-
-            return new ShaclResult(name, inference, conforms, violations, targetCount,
-                    Measurement.average(measurements), null);
         } catch (Throwable t) {
             if (verbose) {
                 System.out.print(" [ERROR: " + t.getClass().getSimpleName() + "] ");
@@ -171,9 +206,11 @@ public class BenchmarkRunner {
             }
             if (t instanceof OutOfMemoryError) {
                 System.gc();
-                return new ShaclResult(name, inference, false, 0, 0, new Measurement(0, 0), "OOM: " + getHeapConfig());
+                return new ShaclResult(name, inference, false, 0, 0, new Measurement(0, 0),
+                        "OOM: " + getHeapConfig());
             }
-            return new ShaclResult(name, inference, false, 0, 0, new Measurement(0, 0), t.toString());
+            return new ShaclResult(name, inference, false, 0, 0, new Measurement(0, 0),
+                    t.toString());
         }
     }
 
@@ -219,19 +256,16 @@ public class BenchmarkRunner {
         Model wg = SbomGenerator.generate(sharedBase, "https://example.org/sbom/warmup/",
                 new GeneratorConfig(5, 99));
         // 1. SPARQL — all query shapes used in the benchmark
-        List<String> warmupQueries = new ArrayList<>(List.of(
-                SparqlQueries.findPackagesDirect(sharedBase),
-                SparqlQueries.licensesDirect(sharedBase),
-                SparqlQueries.depChainDirect(sharedBase),
-                SparqlQueries.countByTypeDirect(sharedBase)
-        ));
+        List<String> warmupQueries =
+                new ArrayList<>(List.of(SparqlQueries.findPackagesDirect(sharedBase),
+                        SparqlQueries.licensesDirect(sharedBase),
+                        SparqlQueries.depChainDirect(sharedBase),
+                        SparqlQueries.countByTypeDirect(sharedBase)));
         if (owlEnabled) {
-            warmupQueries.addAll(List.of(
-                    SparqlQueries.subclassTwoHop(sharedBase),
+            warmupQueries.addAll(List.of(SparqlQueries.subclassTwoHop(sharedBase),
                     SparqlQueries.superclassAll(sharedBase),
                     SparqlQueries.superclassWithType(sharedBase),
-                    SparqlQueries.domainInference(sharedBase)
-            ));
+                    SparqlQueries.domainInference(sharedBase)));
         }
 
         for (String sparql : warmupQueries) {
@@ -269,15 +303,17 @@ public class BenchmarkRunner {
             Property p = stmt.getPredicate();
             RDFNode o = stmt.getObject();
 
-            Resource newS = s.isURIResource() && s.getURI().startsWith(oldBase) 
-                ? canonicalModel.createResource(canonicalBase + s.getURI().substring(oldBase.length())) 
-                : s;
-            Property newP = p.getURI().startsWith(oldBase)
-                ? canonicalModel.createProperty(canonicalBase + p.getURI().substring(oldBase.length()))
-                : p;
+            Resource newS = s.isURIResource() && s.getURI().startsWith(oldBase) ? canonicalModel
+                    .createResource(canonicalBase + s.getURI().substring(oldBase.length())) : s;
+            Property newP =
+                    p.getURI().startsWith(oldBase)
+                            ? canonicalModel.createProperty(
+                                    canonicalBase + p.getURI().substring(oldBase.length()))
+                            : p;
             RDFNode newO = o;
             if (o.isURIResource() && o.asResource().getURI().startsWith(oldBase)) {
-                newO = canonicalModel.createResource(canonicalBase + o.asResource().getURI().substring(oldBase.length()));
+                newO = canonicalModel.createResource(
+                        canonicalBase + o.asResource().getURI().substring(oldBase.length()));
             }
             canonicalModel.add(newS, newP, newO);
         }
@@ -285,7 +321,8 @@ public class BenchmarkRunner {
     }
 
     public static ScenarioResult runSharedNamespace(Map<String, OntologyVersion> versions,
-            String sharedBase, int pkgPerVersion, int repeats, boolean verbose, boolean owlEnabled) throws Exception {
+            String sharedBase, int pkgPerVersion, int repeats, boolean verbose, boolean owlEnabled)
+            throws Exception {
 
         if (verbose)
             System.out.println("  Building shared-namespace data graph ...");
@@ -322,15 +359,20 @@ public class BenchmarkRunner {
         result.buildMeasurement = buildM;
 
         List<String[]> queries = List.of(
-                new String[] {"Find packages + names", SparqlQueries.findPackagesDirect(sharedBase)},
+                new String[] {"Find packages + names",
+                        SparqlQueries.findPackagesDirect(sharedBase)},
                 new String[] {"Packages with licenses", SparqlQueries.licensesDirect(sharedBase)},
                 new String[] {"Dependency chain (2-hop)", SparqlQueries.depChainDirect(sharedBase)},
-                new String[] {"Count elements by type", SparqlQueries.countByTypeDirect(sharedBase)},
-                new String[] {"subClassOf 1-hop: ?x a Core/Artifact", SparqlQueries.subclassTwoHop(sharedBase)},
-                new String[] {"subClassOf 2-hop: ?x a Core/Element", SparqlQueries.superclassAll(sharedBase)},
-                new String[] {"Element + leaf type (transitivity)", SparqlQueries.superclassWithType(sharedBase)},
-                new String[] {"rdfs:domain: Core/from->Relationship", SparqlQueries.domainInference(sharedBase)}
-        );
+                new String[] {"Count elements by type",
+                        SparqlQueries.countByTypeDirect(sharedBase)},
+                new String[] {"subClassOf 1-hop: ?x a Core/Artifact",
+                        SparqlQueries.subclassTwoHop(sharedBase)},
+                new String[] {"subClassOf 2-hop: ?x a Core/Element",
+                        SparqlQueries.superclassAll(sharedBase)},
+                new String[] {"Element + leaf type (transitivity)",
+                        SparqlQueries.superclassWithType(sharedBase)},
+                new String[] {"rdfs:domain: Core/from->Relationship",
+                        SparqlQueries.domainInference(sharedBase)});
 
         int totalTasks = queries.size() + (owlEnabled ? queries.size() : 0) + 1;
         int currentTask = 1;
@@ -340,7 +382,8 @@ public class BenchmarkRunner {
                 System.out.printf("    [%d/%d] %s ", currentTask++, totalTasks, q[0]);
                 System.out.flush();
             }
-            result.queries.add(benchQuery(dataModel, q[0], "direct", q[1], repeats, false, verbose));
+            result.queries
+                    .add(benchQuery(dataModel, q[0], "direct", q[1], repeats, false, verbose));
             if (verbose)
                 System.out.println();
         }
@@ -351,7 +394,8 @@ public class BenchmarkRunner {
                     System.out.printf("    [%d/%d] %s (OWL-RL) ", currentTask++, totalTasks, q[0]);
                     System.out.flush();
                 }
-                result.queries.add(benchQuery(combinedModel, q[0], "owlrl+query", q[1], repeats, true, verbose));
+                result.queries.add(benchQuery(combinedModel, q[0], "owlrl+query", q[1], repeats,
+                        true, verbose));
                 if (verbose)
                     System.out.println();
             }
@@ -437,11 +481,14 @@ public class BenchmarkRunner {
                 new String[] {"Packages with licenses", SparqlQueries.licensesUnion(bases)},
                 new String[] {"Dependency chain (2-hop)", SparqlQueries.depChainUnion(bases)},
                 new String[] {"Count elements by type", SparqlQueries.countByTypeUnion(bases)},
-                new String[] {"subClassOf 1-hop: ?x a Core/Artifact", SparqlQueries.subclassTwoHop(sharedBase)},
-                new String[] {"subClassOf 2-hop: ?x a Core/Element", SparqlQueries.superclassAll(sharedBase)},
-                new String[] {"Element + leaf type (transitivity)", SparqlQueries.superclassWithType(sharedBase)},
-                new String[] {"rdfs:domain: Core/from->Relationship", SparqlQueries.domainInference(sharedBase)}
-        );
+                new String[] {"subClassOf 1-hop: ?x a Core/Artifact",
+                        SparqlQueries.subclassTwoHop(sharedBase)},
+                new String[] {"subClassOf 2-hop: ?x a Core/Element",
+                        SparqlQueries.superclassAll(sharedBase)},
+                new String[] {"Element + leaf type (transitivity)",
+                        SparqlQueries.superclassWithType(sharedBase)},
+                new String[] {"rdfs:domain: Core/from->Relationship",
+                        SparqlQueries.domainInference(sharedBase)});
 
         int totalTasks = unionQueries.size() + (owlEnabled ? unionQueries.size() : 0) + 2;
         int currentTask = 1;
@@ -459,15 +506,22 @@ public class BenchmarkRunner {
         // SPARQL - OWL-RL
         if (owlEnabled) {
             List<String[]> inferQueries = List.of(
-                    new String[] {"Find packages + names", SparqlQueries.findPackagesDirect(sharedBase)},
-                    new String[] {"Packages with licenses", SparqlQueries.licensesDirect(sharedBase)},
-                    new String[] {"Dependency chain (2-hop)", SparqlQueries.depChainDirect(sharedBase)},
-                    new String[] {"Count elements by type", SparqlQueries.countByTypeDirect(sharedBase)},
-                    new String[] {"subClassOf 1-hop: ?x a Core/Artifact", SparqlQueries.subclassTwoHop(sharedBase)},
-                    new String[] {"subClassOf 2-hop: ?x a Core/Element", SparqlQueries.superclassAll(sharedBase)},
-                    new String[] {"Element + leaf type (transitivity)", SparqlQueries.superclassWithType(sharedBase)},
-                    new String[] {"rdfs:domain: Core/from->Relationship", SparqlQueries.domainInference(sharedBase)}
-            );
+                    new String[] {"Find packages + names",
+                            SparqlQueries.findPackagesDirect(sharedBase)},
+                    new String[] {"Packages with licenses",
+                            SparqlQueries.licensesDirect(sharedBase)},
+                    new String[] {"Dependency chain (2-hop)",
+                            SparqlQueries.depChainDirect(sharedBase)},
+                    new String[] {"Count elements by type",
+                            SparqlQueries.countByTypeDirect(sharedBase)},
+                    new String[] {"subClassOf 1-hop: ?x a Core/Artifact",
+                            SparqlQueries.subclassTwoHop(sharedBase)},
+                    new String[] {"subClassOf 2-hop: ?x a Core/Element",
+                            SparqlQueries.superclassAll(sharedBase)},
+                    new String[] {"Element + leaf type (transitivity)",
+                            SparqlQueries.superclassWithType(sharedBase)},
+                    new String[] {"rdfs:domain: Core/from->Relationship",
+                            SparqlQueries.domainInference(sharedBase)});
             for (String[] q : inferQueries) {
                 if (verbose) {
                     System.out.printf("    [%d/%d] %s (OWL-RL) ", currentTask++, totalTasks, q[0]);
@@ -528,8 +582,10 @@ public class BenchmarkRunner {
         warmup(sharedBase, owlEnabled);
 
         int totalScenarios = 1;
-        if (allV.size() >= 2) totalScenarios += 2;
-        if (allV.size() > 2) totalScenarios += 2;
+        if (allV.size() >= 2)
+            totalScenarios += 2;
+        if (allV.size() > 2)
+            totalScenarios += 2;
         int currentScenario = 1;
 
         // Scenario 1: Versioned (1)
@@ -542,34 +598,38 @@ public class BenchmarkRunner {
         results.add(runVersioned(oneV, sharedBase, pkgPerVersion, repeats, verbose, "Versioned (1)",
                 owlEnabled));
 
-        if (allV.size() < 2) return results;
+        if (allV.size() < 2)
+            return results;
 
         // Scenarios 2 & 3: Shared (2) vs Versioned (2)
         Map<String, OntologyVersion> twoV = new LinkedHashMap<>();
         twoV.put(allV.get(0), versions.get(allV.get(0)));
         twoV.put(allV.get(1), versions.get(allV.get(1)));
-        
+
         if (verbose)
             System.out.printf("%n[Scenario %d/%d] Shared namespace (2 versions, canonical IRI)%n",
                     currentScenario++, totalScenarios);
         System.gc();
-        results.add(runSharedNamespace(twoV, sharedBase, pkgPerVersion, repeats, verbose, owlEnabled));
+        results.add(
+                runSharedNamespace(twoV, sharedBase, pkgPerVersion, repeats, verbose, owlEnabled));
 
         if (verbose)
-            System.out.printf("%n[Scenario %d/%d] Versioned - 2 versions%n",
-                    currentScenario++, totalScenarios);
+            System.out.printf("%n[Scenario %d/%d] Versioned - 2 versions%n", currentScenario++,
+                    totalScenarios);
         System.gc();
         results.add(runVersioned(twoV, sharedBase, pkgPerVersion, repeats, verbose, "Versioned (2)",
                 owlEnabled));
 
-        if (allV.size() <= 2) return results;
+        if (allV.size() <= 2)
+            return results;
 
         // Scenarios 4 & 5: Shared (N) and Versioned (N)
         if (verbose)
             System.out.printf("%n[Scenario %d/%d] Shared namespace (%d versions, canonical IRI)%n",
                     currentScenario++, totalScenarios, allV.size());
         System.gc();
-        results.add(runSharedNamespace(versions, sharedBase, pkgPerVersion, repeats, verbose, owlEnabled));
+        results.add(runSharedNamespace(versions, sharedBase, pkgPerVersion, repeats, verbose,
+                owlEnabled));
 
         if (verbose)
             System.out.printf("%n[Scenario %d/%d] Versioned - %d versions%n", currentScenario++,

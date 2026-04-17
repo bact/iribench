@@ -169,6 +169,7 @@ public class ReportPrinter {
         System.out.println("  - " + BOLD + "Warmup:" + RESET + " Engines primed before timing.");
         System.out.println("  - " + BOLD + "Isolation:" + RESET + " System.gc() before each scenario block.");
         System.out.println("  - " + BOLD + "Protection:" + RESET + " Unmeasured discarded first-run per query.");
+        System.out.println("  - " + BOLD + "Cleanup:" + RESET + " InfModel closed after each task to free buffers.");
     }
 
     // -------------------------------------------------------------------
