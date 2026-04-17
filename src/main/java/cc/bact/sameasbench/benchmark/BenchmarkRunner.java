@@ -132,21 +132,21 @@ public class BenchmarkRunner {
                         if (s.getObject().isURIResource())
                             targetClassUris.add(s.getObject().asResource().getURI());
                     });
-            for (String tc : targetClassUris) {
-                String q = "SELECT DISTINCT ?x WHERE { ?x a <" + tc + "> }";
-                try (QueryExecution qe =
-                        QueryExecution.create().query(q).model(dataModel).build()) {
-                    ResultSet rs = qe.execSelect();
-                    while (rs.hasNext()) {
-                        rs.nextSolution();
-                        targetCount++;
-                    }
-                }
-            }
-
             Model queryModel = null;
             try {
                 queryModel = inference.equals("owlrl") ? expandOwlRl(dataModel).model() : dataModel;
+
+                for (String tc : targetClassUris) {
+                    String q = "SELECT DISTINCT ?x WHERE { ?x a <" + tc + "> }";
+                    try (QueryExecution qe =
+                            QueryExecution.create().query(q).model(queryModel).build()) {
+                        ResultSet rs = qe.execSelect();
+                        while (rs.hasNext()) {
+                            rs.nextSolution();
+                            targetCount++;
+                        }
+                    }
+                }
 
                 // Parse shapes once outside the measurement loop
                 Model sm = ModelFactory.createDefaultModel();
