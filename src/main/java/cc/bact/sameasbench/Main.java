@@ -23,12 +23,14 @@ import java.util.*;
     description = {
         "sameas-bench-java -- benchmark the computational cost of versioned IRIs in the SPDX ontology.",
         "",
-        "Five benchmark sections:",
-        "  1. Shared namespace  - canonical https://spdx.org/rdf/3/terms/",
-        "  2. Versioned 1-ver   - equal data volume to Shared Namespace",
-        "  3. Versioned 2-ver   - 3.0.1 + 3.1, own namespaces",
-        "  4. Versioned N-ver   - up to 10 versions",
-        "  5. Reasoner tests    - owl:equivalentClass vs rdfs:subClassOf chain",
+        "Eight benchmark query types:",
+        "  - Identity: Find packages, licenses, and dependency chains",
+        "  - Hierarchy: subClassOf (1-hop, 2-hop, and deep transitivity)",
+        "  - Ontology: Property domain inference and type counting",
+        "",
+        "Scenarios compared:",
+        "  - Shared (Baseline): Canonical namespaces",
+        "  - Versioned (N-versions): Per-version namespaces linked via owl:equivalentClass",
         "",
         "SPARQL strategies: direct / union / owlrl",
         "SHACL: per-version shapes / canonical+OWL-RL",
@@ -56,10 +58,10 @@ public class Main implements Runnable {
     @Command(name = "run", description = "Full benchmark using real SPDX ontologies (downloads on first run).",
              mixinStandardHelpOptions = true)
     static class RunCmd implements Runnable {
-        @Option(names = {"-n","--versions"}, defaultValue = "7", showDefaultValue = Help.Visibility.ALWAYS,
+        @Option(names = {"-n","--versions"}, defaultValue = "5", showDefaultValue = Help.Visibility.ALWAYS,
                 description = "Number of ontology versions (1-10). First 2 are real SPDX TTLs.")
         int versions;
-        @Option(names = {"-p","--packages"}, defaultValue = "50", showDefaultValue = Help.Visibility.ALWAYS,
+        @Option(names = {"-p","--packages"}, defaultValue = "20", showDefaultValue = Help.Visibility.ALWAYS,
                 description = "Packages generated per ontology version.")
         int packages;
         @Option(names = {"-r","--repeats"}, defaultValue = "3", showDefaultValue = Help.Visibility.ALWAYS,

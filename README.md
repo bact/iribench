@@ -82,9 +82,9 @@ Downloads SPDX 3.0.1 and 3.1 TTLs on first run (cached afterward).
 ### `run` — full benchmark
 
 ```bash
-sameas-bench-java run                     # 7 versions, 50 packages, 3 repeats
+sameas-bench-java run                     # 5 versions, 20 packages, 3 repeats
 sameas-bench-java run --versions 3        # fewer versions
-sameas-bench-java run --packages 20       # fewer packages (faster)
+sameas-bench-java run --packages 50       # more packages (slower)
 sameas-bench-java run --no-owlrl          # skip OWL-RL (much faster)
 ```
 
@@ -145,7 +145,7 @@ To ensure high-fidelity measurements and minimize JVM-induced noise, the benchma
 | Aspect | Python (rdflib) | Java (Jena 6.0) |
 | ------ | --------------- | ----------- |
 | SPARQL engine | rdflib ARQ (Python) | Jena ARQ (native Java) |
-| OWL reasoning | owlrl (pure Python) | Jena OWL Micro reasoner (built-in rule engine) |
+| OWL reasoning | owlrl (pure Python) | Jena OWL Mini reasoner (built-in rule engine) |
 | SHACL | pyshacl | jena-shacl |
 | Reasoner approach | Pre-materialization (owlrl adds all closure triples) | Backward Chaining (evaluates OWL-RL rules on-demand during query execution) |
 | Performance | Baseline | Typically 5–50× faster for large graphs |
