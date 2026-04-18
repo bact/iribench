@@ -15,6 +15,7 @@ import cc.bact.sameasbench.datagen.SbomGenerator;
 import cc.bact.sameasbench.ontology.EquivGraphBuilder;
 import cc.bact.sameasbench.ontology.OntologyVersion;
 
+import org.apache.jena.reasoner.rulesys.*;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -27,15 +28,37 @@ public class BenchmarkRunner {
     // Internal: run SPARQL, return row count
     // -------------------------------------------------------------------
     private static int runQuery(Model model, String sparql) {
-        try (QueryExecution qe = QueryExecution.create().query(sparql).model(model)
-                .timeout(300, java.util.concurrent.TimeUnit.SECONDS).build()) {
-            ResultSet rs = qe.execSelect();
-            int count = 0;
-            while (rs.hasNext()) {
-                rs.nextSolution();
-                count++;
+        // Use a watchdog thread to ensure qe.abort() is called even if the reasoner hangs.
+        // We rely on the watchdog because qe.setTimeout is no longer standard in Jena 6.0 interface.
+        try (QueryExecution qe = QueryExecutionFactory.create(sparql, model)) {
+            java.util.concurrent.ScheduledExecutorService watchdog =
+                    java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+            try {
+                // Schedule a hard abort after 300s
+                watchdog.schedule(() -> {
+                    try {
+                        qe.abort();
+                    } catch (Exception ignored) {
+                    }
+                }, 300, java.util.concurrent.TimeUnit.SECONDS);
+
+                ResultSet rs = qe.execSelect();
+                int count = 0;
+                while (rs.hasNext()) {
+                    rs.nextSolution();
+                    count++;
+                }
+                return count;
+            } finally {
+                watchdog.shutdownNow();
             }
-            return count;
+        } catch (org.apache.jena.query.QueryCancelledException e) {
+            throw e;
+        } catch (Exception e) {
+            if (e.getMessage() != null && e.getMessage().contains("aborted")) {
+                throw new org.apache.jena.query.QueryCancelledException();
+            }
+            throw e;
         }
     }
 
@@ -44,11 +67,34 @@ public class BenchmarkRunner {
     // Returns (infModel, timedOut=false)
     // -------------------------------------------------------------------
     private static ModelAndTimeout expandOwlRl(Model combinedModel) {
-        // Use Mini reasoner for a better balance of performance vs inference depth
-        // handles: subClassOf, equivalentClass, sameAs, property transitivity, etc.
-        Reasoner reasoner = ReasonerRegistry.getOWLMiniReasoner();
+        // Use a "Bare minimum" reasoner specifically tuned for this identity hub.
+        // OWL Mini/Full hang on the real SPDX ontology because they try to process
+        // 2000+ complex classes/restrictions. This bare minimum reasoner only handles
+        // the transitivity and identity mapping we actually care about.
+        Reasoner reasoner = getBareMinimumReasoner();
         InfModel inf = ModelFactory.createInfModel(reasoner, combinedModel);
         return new ModelAndTimeout(inf, false);
+    }
+
+    private static Reasoner getBareMinimumReasoner() {
+        String rdf = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
+        String rdfs = "http://www.w3.org/2000/01/rdf-schema#";
+        String owl = "http://www.w3.org/2002/07/owl#";
+
+        String rules =
+                "[equivClass: (?a <" + owl + "equivalentClass> ?b) -> (?a <" + rdfs + "subClassOf> ?b), (?b <" + rdfs + "subClassOf> ?a)]\n"
+                        + "[equivProp:  (?a <" + owl + "equivalentProperty> ?b) -> (?a <" + rdfs + "subPropertyOf> ?b), (?b <" + rdfs + "subPropertyOf> ?a)]\n"
+                        + "[sameAsSym:  (?a <" + owl + "sameAs> ?b) -> (?b <" + owl + "sameAs> ?a)]\n"
+                        + "[sameAsTrans: (?a <" + owl + "sameAs> ?b), (?b <" + owl + "sameAs> ?c) -> (?a <" + owl + "sameAs> ?c)]\n"
+                        + "[subClassTrans: (?a <" + rdfs + "subClassOf> ?b), (?b <" + rdfs + "subClassOf> ?c) -> (?a <" + rdfs + "subClassOf> ?c)]\n"
+                        + "[subPropTrans:  (?a <" + rdfs + "subPropertyOf> ?b), (?b <" + rdfs + "subPropertyOf> ?c) -> (?a <" + rdfs + "subPropertyOf> ?c)]\n"
+                        + "[typeTrans:  (?x <" + rdf + "type> ?a), (?a <" + rdfs + "subClassOf> ?b) -> (?x <" + rdf + "type> ?b)]\n"
+                        + "[propTrans:  (?s ?p ?o), (?p <" + rdfs + "subPropertyOf> ?q) -> (?s ?q ?o)]\n"
+                        + "[domain:     (?p <" + rdfs + "domain> ?c), (?s ?p ?o) -> (?s <" + rdf + "type> ?c)]\n"
+                        + "[range:      (?p <" + rdfs + "range> ?c), (?s ?p ?o) -> (?o <" + rdf + "type> ?c)]\n"
+                        + "[sameAsSubj: (?s ?p ?o), (?s <" + owl + "sameAs> ?s1) -> (?s1 ?p ?o)]\n"
+                        + "[sameAsObj:  (?s ?p ?o), (?o <" + owl + "sameAs> ?o1) -> (?s ?p ?o1)]";
+        return new GenericRuleReasoner(Rule.parseRules(rules));
     }
 
     record ModelAndTimeout(Model model, boolean timedOut) {
@@ -104,7 +150,7 @@ public class BenchmarkRunner {
             return new QueryResult(name, method, 0, new Measurement(300000, 0), true, null);
         } catch (Throwable t) {
             if (verbose) {
-                System.out.print(" [ERROR: " + t.getClass().getSimpleName() + "] ");
+                System.out.print(" [ERROR: " + t.getClass().getSimpleName() + ": " + t.getMessage() + "] ");
                 System.out.flush();
             }
             if (t instanceof OutOfMemoryError) {
@@ -146,8 +192,7 @@ public class BenchmarkRunner {
 
                 for (String tc : targetClassUris) {
                     String q = "SELECT DISTINCT ?x WHERE { ?x a <" + tc + "> }";
-                    try (QueryExecution qe =
-                            QueryExecution.create().query(q).model(queryModel).build()) {
+                    try (QueryExecution qe = QueryExecution.model(queryModel).query(q).build()) {
                         ResultSet rs = qe.execSelect();
                         while (rs.hasNext()) {
                             rs.nextSolution();
@@ -262,21 +307,22 @@ public class BenchmarkRunner {
                         SparqlQueries.depChainDirect(sharedBase),
                         SparqlQueries.countByTypeDirect(sharedBase)));
         if (owlEnabled) {
-            warmupQueries.addAll(List.of(SparqlQueries.subclassTwoHop(sharedBase),
-                    SparqlQueries.superclassAll(sharedBase),
+            warmupQueries.addAll(List.of(SparqlQueries.subclassOneHop(sharedBase),
+                    SparqlQueries.subclassTwoHop(sharedBase),
                     SparqlQueries.superclassWithType(sharedBase),
                     SparqlQueries.domainInference(sharedBase)));
         }
 
         for (String sparql : warmupQueries) {
-            try (QueryExecution qe = QueryExecution.create().query(sparql).model(wg).build()) {
+            try (QueryExecution qe = QueryExecution.model(wg).query(sparql).build()) {
                 qe.execSelect().forEachRemaining(s -> {
                 });
             }
         }
         // 2. OWL-RL on representative graph
         if (owlEnabled) {
-            Reasoner reasoner = ReasonerRegistry.getOWLReasoner();
+            // Reasoner reasoner = ReasonerRegistry.getOWLReasoner();
+            Reasoner reasoner = getBareMinimumReasoner();
             InfModel inf = ModelFactory.createInfModel(reasoner, wg);
             Model mat = ModelFactory.createDefaultModel();
             mat.add(inf);
@@ -366,9 +412,9 @@ public class BenchmarkRunner {
                 new String[] {"Count elements by type",
                         SparqlQueries.countByTypeDirect(sharedBase)},
                 new String[] {"subClassOf 1-hop: ?x a Core/Artifact",
-                        SparqlQueries.subclassTwoHop(sharedBase)},
+                        SparqlQueries.subclassOneHop(sharedBase)},
                 new String[] {"subClassOf 2-hop: ?x a Core/Element",
-                        SparqlQueries.superclassAll(sharedBase)},
+                        SparqlQueries.subclassTwoHop(sharedBase)},
                 new String[] {"Element + leaf type (transitivity)",
                         SparqlQueries.superclassWithType(sharedBase)},
                 new String[] {"rdfs:domain: Core/from->Relationship",
@@ -382,22 +428,23 @@ public class BenchmarkRunner {
                 System.out.printf("    [%d/%d] %s ", currentTask++, totalTasks, q[0]);
                 System.out.flush();
             }
-            result.queries
-                    .add(benchQuery(dataModel, q[0], "direct", q[1], repeats, false, verbose));
+            QueryResult qr = benchQuery(dataModel, q[0], "direct", q[1], repeats, false, verbose);
+            result.queries.add(qr);
             if (verbose)
-                System.out.println();
+                System.out.printf(" [%.1f ms]\n", qr.measurement().wallMs);
         }
 
         if (owlEnabled) {
             for (String[] q : queries) {
                 if (verbose) {
-                    System.out.printf("    [%d/%d] %s (OWL-RL) ", currentTask++, totalTasks, q[0]);
+                    System.out.printf("    [%d/%d] %s (Bare minimum reasoning (custom)) ", currentTask++, totalTasks, q[0]);
                     System.out.flush();
                 }
-                result.queries.add(benchQuery(combinedModel, q[0], "owlrl", q[1], repeats,
-                        true, verbose));
+                QueryResult qr =
+                        benchQuery(combinedModel, q[0], "owlrl", q[1], repeats, true, verbose);
+                result.queries.add(qr);
                 if (verbose)
-                    System.out.println();
+                    System.out.printf(" [%.1f ms]\n", qr.measurement().wallMs);
             }
         }
 
@@ -407,10 +454,11 @@ public class BenchmarkRunner {
                     totalTasks);
             System.out.flush();
         }
-        result.shacl.add(benchShacl(dataModel, "Package + Relationship shapes", shapesTtl, "none",
-                repeats, verbose));
+        ShaclResult sr = benchShacl(dataModel, "Package + Relationship shapes", shapesTtl, "none",
+                repeats, verbose);
+        result.shacl.add(sr);
         if (verbose)
-            System.out.println();
+            System.out.printf(" [%.1f ms]\n", sr.measurement().wallMs);
         return result;
     }
 
@@ -492,14 +540,16 @@ public class BenchmarkRunner {
 
         // SPARQL - CANONICAL (Reasoner-based multi-versioning)
         List<String[]> canonicalQueries = List.of(
-                new String[] {"Find packages + names", SparqlQueries.findPackagesDirect(sharedBase)},
+                new String[] {"Find packages + names",
+                        SparqlQueries.findPackagesDirect(sharedBase)},
                 new String[] {"Packages with licenses", SparqlQueries.licensesDirect(sharedBase)},
                 new String[] {"Dependency chain (2-hop)", SparqlQueries.depChainDirect(sharedBase)},
-                new String[] {"Count elements by type", SparqlQueries.countByTypeDirect(sharedBase)},
+                new String[] {"Count elements by type",
+                        SparqlQueries.countByTypeDirect(sharedBase)},
                 new String[] {"subClassOf 1-hop: ?x a Core/Artifact",
-                        SparqlQueries.subclassTwoHop(sharedBase)},
+                        SparqlQueries.subclassOneHop(sharedBase)},
                 new String[] {"subClassOf 2-hop: ?x a Core/Element",
-                        SparqlQueries.superclassAll(sharedBase)},
+                        SparqlQueries.subclassTwoHop(sharedBase)},
                 new String[] {"Element + leaf type (transitivity)",
                         SparqlQueries.superclassWithType(sharedBase)},
                 new String[] {"rdfs:domain: Core/from->Relationship",
@@ -513,21 +563,23 @@ public class BenchmarkRunner {
                 System.out.printf("    [%d/%d] %s (UNION) ", currentTask++, totalTasks, q[0]);
                 System.out.flush();
             }
-            result.queries.add(benchQuery(dataModel, q[0], "union", q[1], repeats, false, verbose));
+            QueryResult qr = benchQuery(dataModel, q[0], "union", q[1], repeats, false, verbose);
+            result.queries.add(qr);
             if (verbose)
-                System.out.println();
+                System.out.printf(" [%.1f ms]\n", qr.measurement().wallMs);
         }
 
         if (owlEnabled) {
             for (String[] q : canonicalQueries) {
                 if (verbose) {
-                    System.out.printf("    [%d/%d] %s (OWL-RL) ", currentTask++, totalTasks, q[0]);
+                    System.out.printf("    [%d/%d] %s (Bare minimum reasoning (custom)) ", currentTask++, totalTasks, q[0]);
                     System.out.flush();
                 }
-                result.queries.add(benchQuery(combinedModel, q[0], "owlrl", q[1], repeats,
-                        true, verbose));
+                QueryResult qr =
+                        benchQuery(combinedModel, q[0], "owlrl", q[1], repeats, true, verbose);
+                result.queries.add(qr);
                 if (verbose)
-                    System.out.println();
+                    System.out.printf(" [%.1f ms]\n", qr.measurement().wallMs);
             }
         }
 
@@ -542,23 +594,25 @@ public class BenchmarkRunner {
             System.out.printf("    [%d/%d] SHACL (Per-version shapes) ", currentTask++, totalTasks);
             System.out.flush();
         }
-        result.shacl.add(benchShacl(dataModel,
+        ShaclResult sr1 = benchShacl(dataModel,
                 "Per-version shapes, no inference (shapes target each versioned IRI)",
-                versionedShapesTtl, "none", repeats, verbose));
+                versionedShapesTtl, "none", repeats, verbose);
+        result.shacl.add(sr1);
         if (verbose)
-            System.out.println();
+            System.out.printf(" [%.1f ms]\n", sr1.measurement().wallMs);
 
         // SHACL - canonical shapes + OWL-RL
         String canonicalShapesTtl = ShaclShapes.makeShapes(sharedBase);
         if (verbose) {
-            System.out.printf("    [%d/%d] SHACL (Canonical shapes + OWL-RL) ", currentTask++,
+            System.out.printf("    [%d/%d] SHACL (Canonical shapes + Bare minimum reasoning (custom)) ", currentTask++,
                     totalTasks);
             System.out.flush();
         }
-        result.shacl.add(benchShacl(combinedModel, "Canonical shapes + OWL-RL inference",
-                canonicalShapesTtl, "owlrl", repeats, verbose));
+        ShaclResult sr2 = benchShacl(combinedModel, "Canonical shapes + OWL-RL", canonicalShapesTtl,
+                "owlrl", repeats, verbose);
+        result.shacl.add(sr2);
         if (verbose)
-            System.out.println();
+            System.out.printf(" [%.1f ms]\n", sr2.measurement().wallMs);
 
         return result;
     }

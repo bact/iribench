@@ -196,12 +196,12 @@ public final class SparqlQueries {
 
     // --- Reasoner queries (use canonical/shared base) ---
 
-    public static String superclassAll(String base) {
+    public static String subclassTwoHop(String base) {
         return prefixesForBase(base, "spdx")
             + "SELECT DISTINCT ?x WHERE { ?x a spdxCore:Element . }\n";
     }
 
-    public static String subclassTwoHop(String base) {
+    public static String subclassOneHop(String base) {
         return prefixesForBase(base, "spdx")
             + "SELECT DISTINCT ?x WHERE { ?x a spdxCore:Artifact . }\n";
     }

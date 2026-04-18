@@ -36,7 +36,8 @@ public class ReportPrinter {
 
         private int getMaxLineWidth(String cell) {
             int max = 0;
-            if (cell == null) return 0;
+            if (cell == null)
+                return 0;
             for (String line : cell.split("\n", -1)) {
                 max = Math.max(max, stripAnsi(line).length());
             }
@@ -53,7 +54,8 @@ public class ReportPrinter {
         }
 
         private String stripAnsi(String s) {
-            if (s == null) return "";
+            if (s == null)
+                return "";
             return s.replaceAll("\033\\[[\\d;]*m", "");
         }
 
@@ -127,8 +129,8 @@ public class ReportPrinter {
                 + RESET);
         System.out.println(BOLD + CYAN
                 + "  sameas-bench-java — SPDX Versioned IRI Overhead Benchmark" + RESET);
-        System.out
-                .println(BOLD + CYAN + "  Apache Jena 6.0  |  OWL reasoner  |  jena-shacl" + RESET);
+        System.out.println(
+                BOLD + CYAN + "  Apache Jena 6.0  |  Bare minimum reasoner (custom)  |  jena-shacl" + RESET);
         System.out.println(BOLD + CYAN
                 + "========================================================================"
                 + RESET);
@@ -141,22 +143,22 @@ public class ReportPrinter {
         System.out.println();
         System.out.println(BOLD + "Approaches compared:" + RESET);
         System.out.println("  " + GREEN + "direct" + RESET
-                + "        All SBOMs use shared canonical IRI https://spdx.org/rdf/3/terms/");
+                + "    All SBOMs use shared canonical IRI https://spdx.org/rdf/3/terms/");
         System.out.println("  " + YELLOW + "union" + RESET
-                + "         Each SPDX version has its own IRI prefix; queries use SPARQL UNION");
+                + "     Each SPDX version has its own IRI prefix; queries use SPARQL UNION");
         System.out.println("  " + CYAN + "owlrl" + RESET
-                + "   owl:equivalentClass graph + backward chaining (on-the-fly inference), then canonical query");
+                + "     Bare minimum reasoner (custom) (identity linking) + backward chaining (on-the-fly), then canonical query");
         System.out.println();
         System.out.println("  " + BOLD + "Example (Counting Software instances):" + RESET);
-        System.out.println("    " + GREEN + "direct" + RESET
-                + "      : SELECT (COUNT(?x) AS ?c) { ?x a spdx:Software }");
-        System.out.println("    " + YELLOW + "union" + RESET
-                + "       : SELECT (COUNT(?x) AS ?c) { { ?x a v301:Software } UNION { ?x a v31:Software } }");
-        System.out.println("    " + CYAN + "owlrl" + RESET
-                + " : (Backward chain owl:equivalentClass), then SELECT ... { ?x a spdx:Software }");
+        System.out.println("  " + GREEN + "direct" + RESET
+                + "    SELECT (COUNT(?x) AS ?c) { ?x a spdx:Software }");
+        System.out.println("  " + YELLOW + "union" + RESET
+                + "     SELECT (COUNT(?x) AS ?c) { { ?x a v301:Software } UNION { ?x a v31:Software } }");
+        System.out.println("  " + CYAN + "owlrl" + RESET
+                + "     (Backward chain owl:equivalentClass), then SELECT ... { ?x a spdx:Software }");
         System.out.println();
         System.out.println(BOLD + "Limitations:" + RESET);
-        System.out.println("  - OWL-RL uses Jena's built-in OWL reasoner (not full OWL 2 RL)");
+        System.out.println("  - Bare minimum reasoner (custom) uses optimized identity rules (not full OWL 2 RL)");
         System.out
                 .println("  - Synthetic SBOM data mirrors real SPDX 3.x class/property structure");
         System.out.println("  - Wall time includes JVM overhead; CPU time is per-thread");
@@ -164,8 +166,10 @@ public class ReportPrinter {
         System.out.println();
         System.out.println(BOLD + "Accuracy Strategy:" + RESET);
         System.out.println("  - " + BOLD + "Warmup:" + RESET + " Engines primed before timing.");
-        System.out.println("  - " + BOLD + "Isolation:" + RESET + " System.gc() before each scenario block.");
-        System.out.println("  - " + BOLD + "Protection:" + RESET + " Unmeasured discarded first-run per query.");
+        System.out.println(
+                "  - " + BOLD + "Isolation:" + RESET + " System.gc() before each scenario block.");
+        System.out.println("  - " + BOLD + "Protection:" + RESET
+                + " Unmeasured discarded first-run per query.");
     }
 
     // -------------------------------------------------------------------
@@ -174,8 +178,8 @@ public class ReportPrinter {
     private static void printGraphStats(List<ScenarioResult> results) {
         System.out.println();
         System.out.println(BOLD + "Graph Statistics" + RESET);
-        AsciiTable t = new AsciiTable("Namespace\nscenario", "Versions", "Data Triples",
-                "Equiv Triples", "Total Triples", "Build Time (ms)", "Build Mem (MB)");
+        AsciiTable t = new AsciiTable("Namespace\nscenario", "Vers", "Data\nTriples",
+                "Equiv\nTriples", "Total\nTriples", "Build Time\n(ms)", "Build Mem\n(MB)");
         for (ScenarioResult r : results) {
             t.addRow(r.scenarioName, String.valueOf(r.versionsCount),
                     String.format("%,d", r.dataTriples),
@@ -202,8 +206,8 @@ public class ReportPrinter {
         System.out.println();
         System.out.println(BOLD + "Equivalence Graph Breakdown" + RESET);
         AsciiTable t =
-                new AsciiTable("Namespace\nscenario", "equiv:Class pairs", "equiv:Prop pairs",
-                        "sameAs pairs", "Total Classes", "Total Props", "Total Individuals");
+                new AsciiTable("Namespace\nscenario", "equiv:Class\npairs", "equiv:Prop\npairs",
+                        "sameAs\npairs", "Total\nClasses", "Total\nProps", "Total\nIndivs");
         for (ScenarioResult r : versioned) {
             EquivStats e = r.equivStats;
             t.addRow(r.scenarioName, String.valueOf(e.equivClassPairs()),
@@ -235,11 +239,12 @@ public class ReportPrinter {
             System.out.println("  " + BOLD + qname + RESET);
 
             // Collect all methods for this query across scenarios
-            Map<Integer, ScenarioResult> baselines = results.stream()
-                    .filter(res -> res.scenarioName.startsWith("Shared ("))
-                    .collect(Collectors.toMap(res -> res.versionsCount, res -> res, (a, b) -> a));
+            Map<Integer, ScenarioResult> baselines =
+                    results.stream().filter(res -> res.scenarioName.startsWith("Shared (")).collect(
+                            Collectors.toMap(res -> res.versionsCount, res -> res, (a, b) -> a));
 
-            AsciiTable t = new AsciiTable("Namespace\nscenario", "Method", "Wall\nms", "Rows", "Status");
+            AsciiTable t =
+                    new AsciiTable("Namespace\nscenario", "Method", "Wall\nms", "Rows", "Status");
             for (ScenarioResult r : results) {
                 if ("Versioned (1)".equals(r.scenarioName))
                     continue;
@@ -255,7 +260,7 @@ public class ReportPrinter {
                 for (QueryResult q : r.queries) {
                     if (!q.name().equals(qname))
                         continue;
-                    
+
                     String baseMethod = "union".equals(q.method()) ? "direct" : q.method();
                     Integer baseR = baselineRows.get(q.name() + "|" + baseMethod);
                     String rowStr;
@@ -263,7 +268,8 @@ public class ReportPrinter {
                         rowStr = "-";
                     } else {
                         rowStr = String.valueOf(q.resultCount());
-                        if (baseR != null && baseR > 0 && r != base && q.resultCount() == baseR * r.versionsCount) {
+                        if (baseR != null && baseR > 0 && r != base
+                                && q.resultCount() == baseR * r.versionsCount) {
                             rowStr += " " + DIM + "(" + baseR + "x" + r.versionsCount + ")" + RESET;
                         }
                     }
@@ -299,32 +305,35 @@ public class ReportPrinter {
     private static void printShaclResults(List<ScenarioResult> results) {
         System.out.println();
         System.out.println(BOLD + "SHACL Validation Results" + RESET);
-        
-        Map<Integer, ScenarioResult> baselines = results.stream()
-                .filter(r -> r.scenarioName.startsWith("Shared ("))
-                .collect(Collectors.toMap(r -> r.versionsCount, r -> r, (a, b) -> a));
+
+        Map<Integer, ScenarioResult> baselines =
+                results.stream().filter(r -> r.scenarioName.startsWith("Shared ("))
+                        .collect(Collectors.toMap(r -> r.versionsCount, r -> r, (a, b) -> a));
 
         AsciiTable t = new AsciiTable("Namespace\nscenario", "Shapes config", "Inference",
                 "Conforms?", "Violations", "Targets", "Wall\nms", "Status");
         for (ScenarioResult r : results) {
             if ("Versioned (1)".equals(r.scenarioName))
                 continue;
-            
+
             ScenarioResult base = baselines.get(r.versionsCount);
-            Integer baseT = (base != null && !base.shacl.isEmpty()) ? base.shacl.get(0).targetCount() : null;
+            Integer baseT =
+                    (base != null && !base.shacl.isEmpty()) ? base.shacl.get(0).targetCount()
+                            : null;
 
             for (ShaclResult s : r.shacl) {
                 String targetStr = String.valueOf(s.targetCount());
-                if (baseT != null && baseT > 0 && r != base && s.targetCount() == baseT * r.versionsCount) {
+                if (baseT != null && baseT > 0 && r != base
+                        && s.targetCount() == baseT * r.versionsCount) {
                     targetStr += " " + DIM + "(" + baseT + "x" + r.versionsCount + ")" + RESET;
                 }
 
                 String status = s.error() != null ? RED + s.error() + RESET : "ok";
-                t.addRow(r.scenarioName, truncate(s.name(), 45), s.inference(), 
-                        s.error() != null ? "-" : (s.conforms() ? GREEN + "yes" + RESET : RED + "NO" + RESET),
-                        s.error() != null ? "-" : String.valueOf(s.violationCount()), 
-                        targetStr,
-                        s.error() != null ? "-" : String.format("%.1f", s.measurement().wallMs), 
+                t.addRow(r.scenarioName, truncate(s.name(), 45), s.inference(),
+                        s.error() != null ? "-"
+                                : (s.conforms() ? GREEN + "yes" + RESET : RED + "NO" + RESET),
+                        s.error() != null ? "-" : String.valueOf(s.violationCount()), targetStr,
+                        s.error() != null ? "-" : String.format("%.1f", s.measurement().wallMs),
                         status);
             }
         }
@@ -339,9 +348,9 @@ public class ReportPrinter {
         System.out.println(BOLD + "Summary — Overhead vs Shared Namespace" + RESET);
 
         // Map shared baselines by version count
-        Map<Integer, ScenarioResult> baselines = results.stream()
-                .filter(r -> r.scenarioName.startsWith("Shared ("))
-                .collect(Collectors.toMap(r -> r.versionsCount, r -> r, (a, b) -> a));
+        Map<Integer, ScenarioResult> baselines =
+                results.stream().filter(r -> r.scenarioName.startsWith("Shared ("))
+                        .collect(Collectors.toMap(r -> r.versionsCount, r -> r, (a, b) -> a));
 
         if (baselines.isEmpty()) {
             System.out.println("  (no shared namespace baseline found)");
@@ -355,7 +364,8 @@ public class ReportPrinter {
                 continue;
 
             ScenarioResult base = baselines.get(r.versionsCount);
-            if (base == null) continue;
+            if (base == null)
+                continue;
 
             // Build baseline lookup for this specific version count
             Map<String, Double> baselineTime = new HashMap<>();
@@ -395,15 +405,15 @@ public class ReportPrinter {
                     rowStr = "-";
                 } else {
                     rowStr = String.valueOf(q.resultCount());
-                    if (baseR != null && baseR > 0 && r != base && q.resultCount() == baseR * r.versionsCount) {
+                    if (baseR != null && baseR > 0 && r != base
+                            && q.resultCount() == baseR * r.versionsCount) {
                         rowStr += " " + DIM + "(" + baseR + "x" + r.versionsCount + ")" + RESET;
                     }
                 }
 
                 t.addRow(r.scenarioName, q.name(), methodColored(q.method()),
-                        q.error() != null ? "-" : String.format("%.1f", q.measurement().wallMs), 
-                        ratio,
-                        rowStr);
+                        q.error() != null ? "-" : String.format("%.1f", q.measurement().wallMs),
+                        ratio, rowStr);
             }
         }
         t.print();

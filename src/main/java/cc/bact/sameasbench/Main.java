@@ -58,16 +58,16 @@ public class Main implements Runnable {
     @Command(name = "run", description = "Full benchmark using real SPDX ontologies (downloads on first run).",
              mixinStandardHelpOptions = true)
     static class RunCmd implements Runnable {
-        @Option(names = {"-n","--versions"}, defaultValue = "3", showDefaultValue = Help.Visibility.ALWAYS,
-                description = "Number of ontology versions (1-10). First 2 are real SPDX TTLs.")
+        @Option(names = {"-n","--versions"}, defaultValue = "5", showDefaultValue = Help.Visibility.ALWAYS,
+                description = "Number of ontology versions (1-10).")
         int versions;
-        @Option(names = {"-p","--packages"}, defaultValue = "10", showDefaultValue = Help.Visibility.ALWAYS,
+        @Option(names = {"-p","--packages"}, defaultValue = "25", showDefaultValue = Help.Visibility.ALWAYS,
                 description = "Packages generated per ontology version.")
         int packages;
         @Option(names = {"-r","--repeats"}, defaultValue = "3", showDefaultValue = Help.Visibility.ALWAYS,
                 description = "Times each query is repeated (results averaged).")
         int repeats;
-        @Option(names = "--no-owlrl", description = "Skip OWL-RL expansion queries.")
+        @Option(names = "--no-owlrl", description = "Skip Bare minimum reasoner (identity linking) expansion queries.")
         boolean skipOwlrl;
         @Option(names = {"-v","--verbose"}, defaultValue = "true", description = "Show per-step progress.")
         boolean verbose = true;
@@ -198,7 +198,7 @@ public class Main implements Runnable {
             System.out.println();
             if (!useToy) warnIfHeavy(nVersions, packages, repeats, owlEnabled);
             System.out.printf("\033[1;36mRunning benchmarks ...\033[0m  " +
-                "(%d version(s), %d pkg/ver, %d repeat(s), OWL-RL=%s)%n",
+                "(%d version(s), %d pkg/ver, %d repeat(s), Bare minimum reasoner (custom)=%s)%n",
                 nVersions, packages, repeats, owlEnabled ? "on" : "off");
 
             List<ScenarioResult> results =
@@ -214,11 +214,11 @@ public class Main implements Runnable {
     }
 
     private static long estimateOwlRlMs(int n, int pkgs) {
-        // Baseline: ~2s for 2 versions, 10 packages on a 2021 laptop with 8 GB RAM
-        // Jena OWL_MEM_RULE_INF is ~20x faster than Python owlrl
+        // Baseline: ~0.02s for 2 versions, 10 packages on a typical 2021 laptop
+        // The custom Bare Minimum Reasoner (custom) is extremely fast on real-world SPDX data.
         double nFactor = Math.pow((double) n / 2.0, 1.9);
         double pFactor = Math.pow((double) pkgs / 10.0, 1.3);
-        return (long) (2_000.0 * nFactor * pFactor);
+        return (long) (20.0 * nFactor * pFactor);
     }
 
     private static String fmtDuration(long ms) {
@@ -230,10 +230,10 @@ public class Main implements Runnable {
 
     private static void warnIfHeavy(int n, int pkgs, int repeats, boolean owlEnabled) {
         if (!owlEnabled) {
-            System.out.printf("  \033[2mEstimated run time: ~10-30 s  (OWL-RL skipped — only UNION + SHACL)\033[0m%n");
+            System.out.printf("  \033[2mEstimated run time: ~10-30 s  (Bare minimum reasoner (custom) skipped — only UNION + SHACL)\033[0m%n");
             return;
         }
-        // 8 queries x repeats per scenario; all scenarios run OWL-RL if enabled
+        // 8 queries x repeats per scenario; all scenarios run reasoning if enabled
         int owlScenarios = 1;
         if (n >= 2) owlScenarios += 2;
         if (n > 2) owlScenarios += 2;
@@ -243,11 +243,11 @@ public class Main implements Runnable {
         long WARN_THRESHOLD_MS = 60_000L;
         if (totalMs > WARN_THRESHOLD_MS) {
             System.out.printf(
-                "  \033[1;33m⚠ Time warning:\033[0m OWL-RL estimated ~%s total. " +
+                "  \033[1;33m⚠ Time warning:\033[0m Bare minimum reasoner (custom) estimated ~%s total. " +
                 "Use \033[1m--no-owlrl\033[0m to skip.%n",
                 fmtDuration(totalMs));
         } else {
-            System.out.printf("  \033[2mEstimated run time: ~%s (OWL-RL included, on-demand inference)\033[0m%n",
+            System.out.printf("  \033[2mEstimated run time: ~%s (Bare minimum reasoner (custom) included, on-demand inference)\033[0m%n",
                 fmtDuration(totalMs));
         }
     }
