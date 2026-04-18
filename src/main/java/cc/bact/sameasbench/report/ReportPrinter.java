@@ -108,9 +108,10 @@ public class ReportPrinter {
     // Public entry point
     // -------------------------------------------------------------------
     public static void printAll(List<ScenarioResult> results, int pkgPerVersion, int repeats,
-            String sharedBase) {
-        printHeader();
-        printMethodology();
+            String sharedBase, BenchmarkRunner.ReasonerType reasonerType) {
+        if (reasonerType == null) reasonerType = BenchmarkRunner.ReasonerType.MINI;
+        printHeader(reasonerType);
+        printMethodology(reasonerType);
         printGraphStats(results);
         printEquivBreakdown(results);
         printSparqlResults(results);
@@ -122,7 +123,8 @@ public class ReportPrinter {
     // -------------------------------------------------------------------
     // 1. Header
     // -------------------------------------------------------------------
-    private static void printHeader() {
+    private static void printHeader(BenchmarkRunner.ReasonerType reasonerType) {
+        String label = (reasonerType != null) ? reasonerType.label() : "Jena OWL Mini";
         System.out.println();
         System.out.println(BOLD + CYAN
                 + "========================================================================"
@@ -130,7 +132,7 @@ public class ReportPrinter {
         System.out.println(BOLD + CYAN
                 + "  sameas-bench-java — SPDX Versioned IRI Overhead Benchmark" + RESET);
         System.out.println(
-                BOLD + CYAN + "  Apache Jena 6.0  |  Bare minimum reasoner (custom)  |  jena-shacl" + RESET);
+                BOLD + CYAN + "  Apache Jena 6.0  |  " + label + "  |  jena-shacl" + RESET);
         System.out.println(BOLD + CYAN
                 + "========================================================================"
                 + RESET);
@@ -139,7 +141,7 @@ public class ReportPrinter {
     // -------------------------------------------------------------------
     // 2. Methodology
     // -------------------------------------------------------------------
-    private static void printMethodology() {
+    private static void printMethodology(BenchmarkRunner.ReasonerType reasonerType) {
         System.out.println();
         System.out.println(BOLD + "Approaches compared:" + RESET);
         System.out.println("  " + GREEN + "direct" + RESET
@@ -147,7 +149,7 @@ public class ReportPrinter {
         System.out.println("  " + YELLOW + "union" + RESET
                 + "     Each SPDX version has its own IRI prefix; queries use SPARQL UNION");
         System.out.println("  " + CYAN + "owlrl" + RESET
-                + "     Bare minimum reasoner (custom) (identity linking) + backward chaining (on-the-fly), then canonical query");
+                + "     " + reasonerType.label() + " + backward chaining (on-the-fly), then canonical query");
         System.out.println();
         System.out.println("  " + BOLD + "Example (Counting Software instances):" + RESET);
         System.out.println("  " + GREEN + "direct" + RESET
@@ -158,7 +160,7 @@ public class ReportPrinter {
                 + "     (Backward chain owl:equivalentClass), then SELECT ... { ?x a spdx:Software }");
         System.out.println();
         System.out.println(BOLD + "Limitations:" + RESET);
-        System.out.println("  - Bare minimum reasoner (custom) uses optimized identity rules (not full OWL 2 RL)");
+        System.out.println("  - " + reasonerType.label() + " used for identity linking");
         System.out
                 .println("  - Synthetic SBOM data mirrors real SPDX 3.x class/property structure");
         System.out.println("  - Wall time includes JVM overhead; CPU time is per-thread");
@@ -282,7 +284,7 @@ public class ReportPrinter {
                     }
 
                     t.addRow(r.scenarioName, methodColored(q.method()),
-                            q.error() != null ? "-" : String.format("%.1f", q.measurement().wallMs),
+                            (q.error() != null || q.measurement() == null) ? "-" : String.format("%.1f", q.measurement().wallMs),
                             rowStr, status);
                 }
             }
@@ -333,7 +335,7 @@ public class ReportPrinter {
                         s.error() != null ? "-"
                                 : (s.conforms() ? GREEN + "yes" + RESET : RED + "NO" + RESET),
                         s.error() != null ? "-" : String.valueOf(s.violationCount()), targetStr,
-                        s.error() != null ? "-" : String.format("%.1f", s.measurement().wallMs),
+                        (s.error() != null || s.measurement() == null) ? "-" : String.format("%.1f", s.measurement().wallMs),
                         status);
             }
         }
@@ -371,7 +373,9 @@ public class ReportPrinter {
             Map<String, Double> baselineTime = new HashMap<>();
             Map<String, Integer> baselineRows = new HashMap<>();
             for (QueryResult q : base.queries) {
-                baselineTime.put(q.name() + "|" + q.method(), q.measurement().wallMs);
+                if (q.measurement() != null) {
+                    baselineTime.put(q.name() + "|" + q.method(), q.measurement().wallMs);
+                }
                 baselineRows.put(q.name() + "|" + q.method(), q.resultCount());
             }
 
@@ -412,7 +416,7 @@ public class ReportPrinter {
                 }
 
                 t.addRow(r.scenarioName, q.name(), methodColored(q.method()),
-                        q.error() != null ? "-" : String.format("%.1f", q.measurement().wallMs),
+                        (q.error() != null || q.measurement() == null) ? "-" : String.format("%.1f", q.measurement().wallMs),
                         ratio, rowStr);
             }
         }

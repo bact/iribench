@@ -64,7 +64,8 @@ sameas-bench-java smoke       # runs in-memory smoke test, ~20 s
 ```bash
 sameas-bench-java smoke                   # 3 toy versions, 4 packages each
 sameas-bench-java smoke --versions 5      # 5 toy versions
-sameas-bench-java smoke --no-owlrl        # skip Bare minimum reasoner (custom) expansion
+sameas-bench-java smoke --no-owlrl        # skip reasoning expansion
+sameas-bench-java smoke --reasoner custom # use Bare minimum reasoner (custom)
 ```
 
 Good for development and CI. Completes in seconds.
@@ -72,9 +73,9 @@ Good for development and CI. Completes in seconds.
 ### `quick` — fast run with real SPDX ontologies
 
 ```bash
-sameas-bench-java quick                   # 2 versions, 10 packages, 1 repeat, no Bare minimum reasoner (custom)
+sameas-bench-java quick                   # 2 versions, 10 packages, 1 repeat, no reasoning
 sameas-bench-java quick --versions 3      # 3 versions
-sameas-bench-java quick --owlrl           # include Bare minimum reasoner (custom) (slow!)
+sameas-bench-java quick --owlrl           # include reasoning (slow with standard reasoners!)
 ```
 
 Downloads SPDX 3.0.1 and 3.1 TTLs on first run (cached afterward).
@@ -84,9 +85,16 @@ Downloads SPDX 3.0.1 and 3.1 TTLs on first run (cached afterward).
 ```bash
 sameas-bench-java run                     # 5 versions, 25 packages, 3 repeats
 sameas-bench-java run --versions 3        # fewer versions
-sameas-bench-java run --packages 50       # more packages (slower)
-sameas-bench-java run --no-owlrl          # skip Bare minimum reasoner (custom) (much faster)
+sameas-bench-java run --reasoner jena-mini # use OWL Mini (default)
+sameas-bench-java run --reasoner custom    # use Bare minimum reasoner (custom) (recommended for performance)
 ```
+
+#### Reasoner Options (`--reasoner`)
+
+- `jena-mini` (Default): Jena's standard OWL Mini reasoner.
+- `jena-micro`: Lightweight OWL reasoner (faster than OWL Mini; but does not support `owl:sameAs`).
+- `jena-full`: Full OWL reasoner (slowest, most complete; better support of `owl:oneOf`, `owl:disjointWith`, etc. than OWL Mini).
+- `custom`: **Bare minimum reasoner (custom)**. A specialized, high-speed reasoner that only processes `owl:sameAs`, `owl:equivalentClass`, and `owl:equivalentProperty`. Optimized specifically for SPDX 3 identity hubbing. Use this for large-scale benchmarks where identity resolution is the primary requirement.
 
 ### `list-cache` / `clear-cache`
 
@@ -103,9 +111,9 @@ sameas-bench-java clear-cache   # delete cached TTLs (forces re-download on next
 | ------- | ---------------- |
 | **Graph Statistics** | Triple counts and build time per scenario |
 | **Equivalence Breakdown** | `owl:equivalentClass` / `equivalentProperty` / `sameAs` counts |
-| **SPARQL Query Results** | `direct` vs `union` vs `owlrl` (Bare minimum reasoner (custom)) — wall time and row counts |
-| **SHACL Validation** | Per-version shapes (no inference) vs canonical shapes + Bare minimum reasoner (custom) |
-| **Summary** | Overhead ratios: union and Bare minimum reasoner (custom) vs shared-namespace baseline |
+| **SPARQL Query Results** | `direct` vs `union` vs `owlrl` (Selected Reasoner) — wall time and row counts |
+| **SHACL Validation** | Per-version shapes (no inference) vs canonical shapes + Selected Reasoner |
+| **Summary** | Overhead ratios: union and Selected Reasoner vs shared-namespace baseline |
 | **Computing Environment** | CPU, RAM, JVM, OS, total wall time |
 
 ---
@@ -116,7 +124,7 @@ sameas-bench-java clear-cache   # delete cached TTLs (forces re-download on next
 | -------- | ------------ | -------------------- |
 | `direct` | All data uses shared canonical IRI — no equivalences needed | O(1) |
 | `union` | Each version has own IRI; query has one UNION branch per version | O(N) |
-| `owlrl` | Bare minimum reasoner (custom) hub graph + Backward Chaining (on-the-fly), then canonical query | super-linear |
+| `owlrl` | Selected Reasoner hub graph + Backward Chaining (on-the-fly), then canonical query | super-linear |
 
 ---
 
@@ -140,23 +148,20 @@ To ensure high-fidelity measurements and minimize JVM-induced noise, the benchma
 
 ---
 
-## Differences from Python version
+## Reasoner choice
 
-| Aspect | Python (rdflib) | Java (Jena 6.0) |
-| ------ | --------------- | ----------- |
-| SPARQL engine | rdflib ARQ (Python) | Jena ARQ (native Java) |
-| OWL reasoning | owlrl (pure Python) | Custom Bare minimum reasoner (custom) (optimized rule set) |
-| SHACL | pyshacl | jena-shacl |
-| Reasoner approach | Pre-materialization (owlrl adds all closure triples) | Backward Chaining (evaluates OWL-RL rules on-demand during query execution) |
-| Performance | Baseline | Typically 5–50× faster for large graphs |
+The Java version allows switching between several reasoning profiles via the `--reasoner` flag.
 
-> **Optimization note**: The Java version leverages Jena's **Backward chaining** mechanism for the `owlrl` strategy. Instead of forward materializing the entire equivalence graph (which scales poorly and consumes excessive memory by pre-computing all closure triples), the inference rules are evaluated on-the-fly when evaluating the SPARQL query patterns. This drastically reduces the memory overhead.
->
-> **Reasoner choice**: We use a custom **Bare minimum reasoner (custom)** (implemented via Jena's `GenericRuleReasoner`). This provides the optimal balance for SPDX identity management:
-> - **Completeness**: Unlike `OWL Micro`, it fully handles `owl:sameAs`, `owl:equivalentClass`, and `owl:equivalentProperty`.
-> - **Efficiency**: Unlike `OWL Mini` or `Full`, it ignores the 2000+ complex OWL restrictions and intersections in the SPDX ontology that cause performance blowout.
-> - **Coverage**: It specifically implements transitivity for `subClassOf`/`subPropertyOf`, RDFS `domain`/`range` inference, and symmetric/transitive `sameAs` hub mapping.
->
-> This choice ensures 100% accuracy for all 8 benchmark categories while maintaining steady sub-second inference performance even on large graphs.
->
-> **Resilience strategy**: The benchmark runner is instrumented to catch `OutOfMemoryError` and `QueryCancelledException` (timeouts). If a specific reasoning task exceeds available resources or the 5-minute safety threshold, the system records the error with heap context and proceeds to the next scenario rather than crashing the entire suite.
+- **Bare minimum reasoner (custom)** (recommended): Implemented via Jena's `GenericRuleReasoner`. This provides the optimal balance for SPDX identity management:
+  - **Completeness**: Fully handles `owl:sameAs`, `owl:equivalentClass`, and `owl:equivalentProperty`.
+  - **Efficiency**: Ignores 2000+ complex OWL restrictions that cause performance blowout in standard reasoners.
+  - **Coverage**: Specifically implements transitivity for `subClassOf`/`subPropertyOf` and RDFS `domain`/`range` inference.
+- **Jena standard reasoners**: `jena-mini`, `jena-micro`, and `jena-full` provide standard-compliant OWL 2 RL/Mini/Full profiles. These are useful for verifying the custom reasoner's accuracy but are significantly slower on real-world SPDX ontologies.
+
+---
+
+## Resilience strategy
+
+The benchmark runner is instrumented to catch `OutOfMemoryError` and `QueryCancelledException` (timeouts). If a specific reasoning task exceeds available resources or the 5-minute safety threshold, the system records the error and proceeds to the next scenario.
+> [!TIP]
+> If you encounter timeouts with `jena-mini` or `jena-full`, try using `--reasoner jena-micro` or `--reasoner custom`.

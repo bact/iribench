@@ -5,14 +5,10 @@ import org.apache.jena.rdf.model.*;
 import org.apache.jena.reasoner.Reasoner;
 import org.apache.jena.reasoner.ReasonerRegistry;
 import org.apache.jena.rdf.model.InfModel;
-import org.apache.jena.riot.Lang;
 import org.apache.jena.riot.RDFDataMgr;
 import org.apache.jena.shacl.*;
-import org.apache.jena.vocabulary.OWL;
 import cc.bact.sameasbench.Measurement;
-import cc.bact.sameasbench.datagen.GeneratorConfig;
 import cc.bact.sameasbench.datagen.SbomGenerator;
-import cc.bact.sameasbench.ontology.EquivGraphBuilder;
 import cc.bact.sameasbench.ontology.OntologyVersion;
 
 import org.apache.jena.reasoner.rulesys.*;
@@ -21,6 +17,17 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 public class BenchmarkRunner {
+    
+    public enum ReasonerType {
+        FULL("Jena full OWL"),
+        MINI("Jena OWL Mini"),
+        MICRO("Jena OWL Micro"),
+        CUSTOM("Bare minimum (custom)");
+
+        private final String label;
+        ReasonerType(String label) { this.label = label; }
+        public String label() { return label; }
+    }
 
     // Using a 5-minute safety timeout to prevent reasoner blowout on complex ontologies
 
@@ -63,15 +70,19 @@ public class BenchmarkRunner {
     }
 
     // -------------------------------------------------------------------
-    // Internal: configure OWL-RL backward chaining
+    // Internal: configure OWL reasoner
     // Returns (infModel, timedOut=false)
     // -------------------------------------------------------------------
-    private static ModelAndTimeout expandOwlRl(Model combinedModel) {
-        // Use a "Bare minimum" reasoner specifically tuned for this identity hub.
-        // OWL Mini/Full hang on the real SPDX ontology because they try to process
-        // 2000+ complex classes/restrictions. This bare minimum reasoner only handles
-        // the transitivity and identity mapping we actually care about.
-        Reasoner reasoner = getBareMinimumReasoner();
+    private static ModelAndTimeout expandOwlRl(Model combinedModel, ReasonerType type) {
+        Reasoner reasoner;
+        if (type == null) type = ReasonerType.MINI;
+        switch (type) {
+            case FULL -> reasoner = ReasonerRegistry.getOWLReasoner();
+            case MINI -> reasoner = ReasonerRegistry.getOWLMiniReasoner();
+            case MICRO -> reasoner = ReasonerRegistry.getOWLMicroReasoner();
+            case CUSTOM -> reasoner = getBareMinimumReasoner();
+            default -> reasoner = getBareMinimumReasoner();
+        }
         InfModel inf = ModelFactory.createInfModel(reasoner, combinedModel);
         return new ModelAndTimeout(inf, false);
     }
@@ -115,12 +126,12 @@ public class BenchmarkRunner {
     // Internal: bench one query
     // -------------------------------------------------------------------
     private static QueryResult benchQuery(Model model, String name, String method, String sparql,
-            int repeats, boolean expandOwl, boolean verbose) {
+            int repeats, boolean expandOwl, ReasonerType reasonerType, boolean verbose) {
         Model targetModel = null;
         try {
             targetModel = model;
             if (expandOwl) {
-                targetModel = expandOwlRl(model).model();
+                targetModel = expandOwlRl(model, reasonerType).model();
             }
 
             // Cold start protection: run the query once and discard the result.
@@ -145,6 +156,7 @@ public class BenchmarkRunner {
         } catch (org.apache.jena.query.QueryCancelledException te) {
             if (verbose) {
                 System.out.print(" [TIMEOUT] ");
+                System.out.println("\033[2m(Suggestion: Try a lighter reasoner like OWL Micro if this continues)\033[0m");
                 System.out.flush();
             }
             return new QueryResult(name, method, 0, new Measurement(300000, 0), true, null);
@@ -166,7 +178,7 @@ public class BenchmarkRunner {
     // Internal: run SHACL
     // -------------------------------------------------------------------
     private static ShaclResult benchShacl(Model dataModel, String name, String shapesTtl,
-            String inference, int repeats, boolean verbose) {
+            String inference, ReasonerType reasonerType, int repeats, boolean verbose) {
         try {
             List<Measurement> measurements = new ArrayList<>();
             boolean conforms = false;
@@ -188,7 +200,7 @@ public class BenchmarkRunner {
                     });
             Model queryModel = null;
             try {
-                queryModel = inference.equals("owlrl") ? expandOwlRl(dataModel).model() : dataModel;
+                queryModel = inference.equals("owlrl") ? expandOwlRl(dataModel, reasonerType).model() : dataModel;
 
                 for (String tc : targetClassUris) {
                     String q = "SELECT DISTINCT ?x WHERE { ?x a <" + tc + "> }";
@@ -297,7 +309,7 @@ public class BenchmarkRunner {
     // execution paths before the first timed scenario. A 1-triple graph
     // is insufficient: Jena's query planner and OWL rule engine only reach
     // steady-state performance once they process schema-like triple patterns.
-    public static void warmup(String sharedBase, boolean owlEnabled) throws Exception {
+    public static void warmup(String sharedBase, boolean owlEnabled, ReasonerType reasonerType) throws Exception {
         Model wg = SbomGenerator.generate(sharedBase, "https://example.org/sbom/warmup/",
                 new GeneratorConfig(5, 99));
         // 1. SPARQL — all query shapes used in the benchmark
@@ -321,8 +333,15 @@ public class BenchmarkRunner {
         }
         // 2. OWL-RL on representative graph
         if (owlEnabled) {
-            // Reasoner reasoner = ReasonerRegistry.getOWLReasoner();
-            Reasoner reasoner = getBareMinimumReasoner();
+            Reasoner reasoner;
+            if (reasonerType == null) reasonerType = ReasonerType.MINI;
+            switch (reasonerType) {
+                case FULL -> reasoner = ReasonerRegistry.getOWLReasoner();
+                case MINI -> reasoner = ReasonerRegistry.getOWLMiniReasoner();
+                case MICRO -> reasoner = ReasonerRegistry.getOWLMicroReasoner();
+                case CUSTOM -> reasoner = getBareMinimumReasoner();
+                default -> reasoner = getBareMinimumReasoner();
+            }
             InfModel inf = ModelFactory.createInfModel(reasoner, wg);
             Model mat = ModelFactory.createDefaultModel();
             mat.add(inf);
@@ -367,7 +386,7 @@ public class BenchmarkRunner {
     }
 
     public static ScenarioResult runSharedNamespace(Map<String, OntologyVersion> versions,
-            String sharedBase, int pkgPerVersion, int repeats, boolean verbose, boolean owlEnabled)
+            String sharedBase, int pkgPerVersion, int repeats, boolean verbose, boolean owlEnabled, ReasonerType reasonerType)
             throws Exception {
 
         if (verbose)
@@ -428,7 +447,7 @@ public class BenchmarkRunner {
                 System.out.printf("    [%d/%d] %s ", currentTask++, totalTasks, q[0]);
                 System.out.flush();
             }
-            QueryResult qr = benchQuery(dataModel, q[0], "direct", q[1], repeats, false, verbose);
+            QueryResult qr = benchQuery(dataModel, q[0], "direct", q[1], repeats, false, reasonerType, verbose);
             result.queries.add(qr);
             if (verbose)
                 System.out.printf(" [%.1f ms]\n", qr.measurement().wallMs);
@@ -437,11 +456,11 @@ public class BenchmarkRunner {
         if (owlEnabled) {
             for (String[] q : queries) {
                 if (verbose) {
-                    System.out.printf("    [%d/%d] %s (Bare minimum reasoning (custom)) ", currentTask++, totalTasks, q[0]);
+                    System.out.printf("    [%d/%d] %s (%s) ", currentTask++, totalTasks, q[0], reasonerType.label());
                     System.out.flush();
                 }
                 QueryResult qr =
-                        benchQuery(combinedModel, q[0], "owlrl", q[1], repeats, true, verbose);
+                        benchQuery(combinedModel, q[0], "owlrl", q[1], repeats, true, reasonerType, verbose);
                 result.queries.add(qr);
                 if (verbose)
                     System.out.printf(" [%.1f ms]\n", qr.measurement().wallMs);
@@ -455,7 +474,7 @@ public class BenchmarkRunner {
             System.out.flush();
         }
         ShaclResult sr = benchShacl(dataModel, "Package + Relationship shapes", shapesTtl, "none",
-                repeats, verbose);
+                reasonerType, repeats, verbose);
         result.shacl.add(sr);
         if (verbose)
             System.out.printf(" [%.1f ms]\n", sr.measurement().wallMs);
@@ -467,7 +486,7 @@ public class BenchmarkRunner {
     // -------------------------------------------------------------------
     public static ScenarioResult runVersioned(Map<String, OntologyVersion> versions,
             String sharedBase, int pkgPerVersion, int repeats, boolean verbose, String scenarioName,
-            boolean owlEnabled) throws Exception {
+            boolean owlEnabled, ReasonerType reasonerType) throws Exception {
 
         List<String> versionsList = new ArrayList<>(versions.keySet());
         List<String> bases = new ArrayList<>();
@@ -563,7 +582,7 @@ public class BenchmarkRunner {
                 System.out.printf("    [%d/%d] %s (UNION) ", currentTask++, totalTasks, q[0]);
                 System.out.flush();
             }
-            QueryResult qr = benchQuery(dataModel, q[0], "union", q[1], repeats, false, verbose);
+            QueryResult qr = benchQuery(dataModel, q[0], "union", q[1], repeats, false, reasonerType, verbose);
             result.queries.add(qr);
             if (verbose)
                 System.out.printf(" [%.1f ms]\n", qr.measurement().wallMs);
@@ -572,11 +591,11 @@ public class BenchmarkRunner {
         if (owlEnabled) {
             for (String[] q : canonicalQueries) {
                 if (verbose) {
-                    System.out.printf("    [%d/%d] %s (Bare minimum reasoning (custom)) ", currentTask++, totalTasks, q[0]);
+                    System.out.printf("    [%d/%d] %s (%s) ", currentTask++, totalTasks, q[0], reasonerType.label());
                     System.out.flush();
                 }
                 QueryResult qr =
-                        benchQuery(combinedModel, q[0], "owlrl", q[1], repeats, true, verbose);
+                        benchQuery(combinedModel, q[0], "owlrl", q[1], repeats, true, reasonerType, verbose);
                 result.queries.add(qr);
                 if (verbose)
                     System.out.printf(" [%.1f ms]\n", qr.measurement().wallMs);
@@ -596,7 +615,7 @@ public class BenchmarkRunner {
         }
         ShaclResult sr1 = benchShacl(dataModel,
                 "Per-version shapes, no inference (shapes target each versioned IRI)",
-                versionedShapesTtl, "none", repeats, verbose);
+                versionedShapesTtl, "none", reasonerType, repeats, verbose);
         result.shacl.add(sr1);
         if (verbose)
             System.out.printf(" [%.1f ms]\n", sr1.measurement().wallMs);
@@ -604,12 +623,12 @@ public class BenchmarkRunner {
         // SHACL - canonical shapes + OWL-RL
         String canonicalShapesTtl = ShaclShapes.makeShapes(sharedBase);
         if (verbose) {
-            System.out.printf("    [%d/%d] SHACL (Canonical shapes + Bare minimum reasoning (custom)) ", currentTask++,
-                    totalTasks);
+            System.out.printf("    [%d/%d] SHACL (Canonical shapes + %s) ", currentTask++,
+                    totalTasks, reasonerType.label());
             System.out.flush();
         }
         ShaclResult sr2 = benchShacl(combinedModel, "Canonical shapes + OWL-RL", canonicalShapesTtl,
-                "owlrl", repeats, verbose);
+                "owlrl", reasonerType, repeats, verbose);
         result.shacl.add(sr2);
         if (verbose)
             System.out.printf(" [%.1f ms]\n", sr2.measurement().wallMs);
@@ -621,7 +640,7 @@ public class BenchmarkRunner {
     // Top-level entry point
     // -------------------------------------------------------------------
     public static List<ScenarioResult> runAll(Map<String, OntologyVersion> versions,
-            String sharedBase, int pkgPerVersion, int repeats, boolean verbose, boolean owlEnabled)
+            String sharedBase, int pkgPerVersion, int repeats, boolean verbose, boolean owlEnabled, ReasonerType reasonerType)
             throws Exception {
 
         List<String> allV = new ArrayList<>(versions.keySet());
@@ -629,8 +648,7 @@ public class BenchmarkRunner {
 
         if (verbose)
             System.out.println("  Cleaning heap and warming up JVM + Jena engines ...");
-        System.gc();
-        warmup(sharedBase, owlEnabled);
+        warmup(sharedBase, owlEnabled, reasonerType);
 
         int totalScenarios = 1;
         if (allV.size() >= 2)
@@ -645,9 +663,8 @@ public class BenchmarkRunner {
         if (verbose)
             System.out.printf("%n[Scenario %d/%d] Versioned - 1 version (%s)%n", currentScenario++,
                     totalScenarios, allV.get(0));
-        System.gc();
         results.add(runVersioned(oneV, sharedBase, pkgPerVersion, repeats, verbose, "Versioned (1)",
-                owlEnabled));
+                owlEnabled, reasonerType));
 
         if (allV.size() < 2)
             return results;
@@ -660,16 +677,14 @@ public class BenchmarkRunner {
         if (verbose)
             System.out.printf("%n[Scenario %d/%d] Shared namespace (2 versions, canonical IRI)%n",
                     currentScenario++, totalScenarios);
-        System.gc();
         results.add(
-                runSharedNamespace(twoV, sharedBase, pkgPerVersion, repeats, verbose, owlEnabled));
+                runSharedNamespace(twoV, sharedBase, pkgPerVersion, repeats, verbose, owlEnabled, reasonerType));
 
         if (verbose)
             System.out.printf("%n[Scenario %d/%d] Versioned - 2 versions%n", currentScenario++,
                     totalScenarios);
-        System.gc();
         results.add(runVersioned(twoV, sharedBase, pkgPerVersion, repeats, verbose, "Versioned (2)",
-                owlEnabled));
+                owlEnabled, reasonerType));
 
         if (allV.size() <= 2)
             return results;
@@ -678,16 +693,14 @@ public class BenchmarkRunner {
         if (verbose)
             System.out.printf("%n[Scenario %d/%d] Shared namespace (%d versions, canonical IRI)%n",
                     currentScenario++, totalScenarios, allV.size());
-        System.gc();
         results.add(runSharedNamespace(versions, sharedBase, pkgPerVersion, repeats, verbose,
-                owlEnabled));
+                owlEnabled, reasonerType));
 
         if (verbose)
             System.out.printf("%n[Scenario %d/%d] Versioned - %d versions%n", currentScenario++,
                     totalScenarios, allV.size());
-        System.gc();
         results.add(runVersioned(versions, sharedBase, pkgPerVersion, repeats, verbose,
-                "Versioned (" + allV.size() + ")", owlEnabled));
+                "Versioned (" + allV.size() + ")", owlEnabled, reasonerType));
 
         return results;
     }
