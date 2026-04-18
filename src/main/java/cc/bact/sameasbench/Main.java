@@ -4,6 +4,7 @@ import picocli.CommandLine;
 import picocli.CommandLine.*;
 
 import cc.bact.sameasbench.benchmark.BenchmarkRunner;
+import cc.bact.sameasbench.benchmark.ReasonerType;
 import cc.bact.sameasbench.benchmark.ScenarioResult;
 import cc.bact.sameasbench.ontology.*;
 import cc.bact.sameasbench.report.ReportPrinter;
@@ -70,7 +71,7 @@ public class Main implements Runnable {
         @Option(names = "--no-owlrl", description = "Skip reasoning expansion queries.")
         boolean skipOwlrl;
         @Option(names = "--reasoner", defaultValue = "jena-mini", 
-                description = "Reasoner to use: jena-full, jena-mini (default), jena-micro, or custom (Bare minimum reasoner).")
+                description = "Reasoner: jena-full, jena-mini (default), jena-micro, or spdx-custom.")
         String reasoner = "jena-mini";
         @Option(names = {"-v","--verbose"}, defaultValue = "true", description = "Show per-step progress.")
         boolean verbose = true;
@@ -97,7 +98,7 @@ public class Main implements Runnable {
         @Option(names = "--owlrl", description = "Force reasoning even in quick mode.")
         boolean forceOwlrl;
         @Option(names = "--reasoner", defaultValue = "jena-mini", 
-                description = "Reasoner to use.")
+                description = "Reasoner: jena-full, jena-mini, jena-micro, or spdx-custom.")
         String reasoner = "jena-mini";
         @Option(names = {"-v","--verbose"}, defaultValue = "true") boolean verbose = true;
 
@@ -121,7 +122,8 @@ public class Main implements Runnable {
         int packages;
         @Option(names = "--no-owlrl", description = "Skip reasoning expansion queries.")
         boolean skipOwlrl;
-        @Option(names = "--reasoner", defaultValue = "jena-mini", description = "Reasoner to use.")
+        @Option(names = "--reasoner", defaultValue = "jena-mini", 
+                description = "Reasoner: jena-full, jena-mini, jena-micro, or spdx-custom.")
         String reasoner = "jena-mini";
 
         @Override public void run() {
@@ -182,18 +184,21 @@ public class Main implements Runnable {
     static void execute(int nVersions, int packages, int repeats,
                         boolean skipOwlrl, String reasonerStr, boolean verbose, boolean useToy) {
         boolean owlEnabled = !skipOwlrl;
-        BenchmarkRunner.ReasonerType reasonerType = BenchmarkRunner.ReasonerType.MINI;
+        ReasonerType reasonerType = ReasonerType.MINI;
         if (reasonerStr != null) {
-            switch (reasonerStr.toLowerCase()) {
-                case "jena-full" -> reasonerType = BenchmarkRunner.ReasonerType.FULL;
-                case "jena-mini" -> reasonerType = BenchmarkRunner.ReasonerType.MINI;
-                case "jena-micro" -> reasonerType = BenchmarkRunner.ReasonerType.MICRO;
-                case "custom" -> reasonerType = BenchmarkRunner.ReasonerType.CUSTOM;
-                default -> {
-                    System.err.println("Unknown reasoner: " + reasonerStr + ". Defaulting to jena-mini.");
-                    reasonerType = BenchmarkRunner.ReasonerType.MINI;
-                }
+            String r = reasonerStr.toLowerCase();
+            if (r.equals("jena-full")) reasonerType = ReasonerType.FULL;
+            else if (r.equals("jena-mini")) reasonerType = ReasonerType.MINI;
+            else if (r.equals("jena-micro")) reasonerType = ReasonerType.MICRO;
+            else if (r.equals("spdx-custom")) reasonerType = ReasonerType.SPDX_CUSTOM;
+            else {
+                System.err.println("Error: Unknown reasoner '" + reasonerStr + "'.");
+                System.err.println("Available reasoners: jena-full, jena-mini, jena-micro, spdx-custom");
+                System.exit(1);
             }
+        }
+        if (reasonerType == null) {
+            reasonerType = ReasonerType.MINI;
         }
 
         System.out.printf("\033[1;36msameas-bench-java\033[0m v1.0  |  Apache Jena 6.0  |  jena-shacl%n");
@@ -220,9 +225,10 @@ public class Main implements Runnable {
 
             System.out.println();
             if (!useToy) warnIfHeavy(nVersions, packages, repeats, owlEnabled, reasonerType);
+            String rLabel = (reasonerType != null) ? reasonerType.label() : "Unknown";
             System.out.printf("\033[1;36mRunning benchmarks ...\033[0m  " +
                 "(%d version(s), %d pkg/ver, %d repeat(s), Reasoner=%s, Enabled=%s)%n",
-                nVersions, packages, repeats, reasonerType.label(), owlEnabled ? "on" : "off");
+                nVersions, packages, repeats, rLabel, owlEnabled ? "on" : "off");
 
             List<ScenarioResult> results =
                 BenchmarkRunner.runAll(versions, sharedBase, packages, repeats, verbose, owlEnabled, reasonerType);
@@ -236,7 +242,7 @@ public class Main implements Runnable {
         }
     }
 
-    private static long estimateOwlRlMs(int n, int pkgs, BenchmarkRunner.ReasonerType type) {
+    private static long estimateOwlRlMs(int n, int pkgs, ReasonerType type) {
         // Baseline: ~0.02s for 2 versions, 10 packages on a typical 2021 laptop (Custom reasoner)
         double nFactor = Math.pow((double) n / 2.0, 1.9);
         double pFactor = Math.pow((double) pkgs / 10.0, 1.3);
@@ -245,7 +251,7 @@ public class Main implements Runnable {
             case FULL -> base = 5000.0; // Jena Full OWL is very heavy
             case MINI -> base = 1000.0; // OWL Mini is lighter but still processes schema
             case MICRO -> base = 200.0; // OWL Micro is minimal
-            case CUSTOM -> base = 20.0;
+            case SPDX_CUSTOM -> base = 20.0;
         }
         return (long) (base * nFactor * pFactor);
     }
@@ -257,7 +263,7 @@ public class Main implements Runnable {
         return m + "m " + s + "s";
     }
 
-    private static void warnIfHeavy(int n, int pkgs, int repeats, boolean owlEnabled, BenchmarkRunner.ReasonerType type) {
+    private static void warnIfHeavy(int n, int pkgs, int repeats, boolean owlEnabled, ReasonerType type) {
         if (!owlEnabled) {
             System.out.printf("  \033[2mEstimated run time: ~10-30 s  (Reasoning skipped — only UNION + SHACL)\033[0m%n");
             return;
@@ -270,14 +276,15 @@ public class Main implements Runnable {
         long owlMs = estimateOwlRlMs(n, pkgs, type) * 8L * repeats * owlScenarios;
         long totalMs = owlMs + 5_000L; // add 5s floor for UNION/SHACL
         long WARN_THRESHOLD_MS = 60_000L;
+        String rLabel = (type != null) ? type.label() : "Unknown";
         if (totalMs > WARN_THRESHOLD_MS) {
             System.out.printf(
                 "  \033[1;33m⚠ Time warning:\033[0m %s estimated ~%s total. " +
                 "Use \033[1m--no-owlrl\033[0m to skip.%n",
-                type.label(), fmtDuration(totalMs));
+                rLabel, fmtDuration(totalMs));
         } else {
             System.out.printf("  \033[2mEstimated run time: ~%s (%s included, on-demand inference)\033[0m%n",
-                fmtDuration(totalMs), type.label());
+                fmtDuration(totalMs), rLabel);
         }
     }
 

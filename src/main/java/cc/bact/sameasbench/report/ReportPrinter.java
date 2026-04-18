@@ -1,6 +1,7 @@
 package cc.bact.sameasbench.report;
 
 import cc.bact.sameasbench.benchmark.*;
+import cc.bact.sameasbench.benchmark.ReasonerType;
 
 import java.lang.management.ManagementFactory;
 import java.lang.management.OperatingSystemMXBean;
@@ -108,8 +109,8 @@ public class ReportPrinter {
     // Public entry point
     // -------------------------------------------------------------------
     public static void printAll(List<ScenarioResult> results, int pkgPerVersion, int repeats,
-            String sharedBase, BenchmarkRunner.ReasonerType reasonerType) {
-        if (reasonerType == null) reasonerType = BenchmarkRunner.ReasonerType.MINI;
+            String sharedBase, ReasonerType reasonerType) {
+        if (reasonerType == null) reasonerType = ReasonerType.MINI;
         printHeader(reasonerType);
         printMethodology(reasonerType);
         printGraphStats(results);
@@ -123,7 +124,7 @@ public class ReportPrinter {
     // -------------------------------------------------------------------
     // 1. Header
     // -------------------------------------------------------------------
-    private static void printHeader(BenchmarkRunner.ReasonerType reasonerType) {
+    private static void printHeader(ReasonerType reasonerType) {
         String label = (reasonerType != null) ? reasonerType.label() : "Jena OWL Mini";
         System.out.println();
         System.out.println(BOLD + CYAN
@@ -141,7 +142,7 @@ public class ReportPrinter {
     // -------------------------------------------------------------------
     // 2. Methodology
     // -------------------------------------------------------------------
-    private static void printMethodology(BenchmarkRunner.ReasonerType reasonerType) {
+    private static void printMethodology(ReasonerType reasonerType) {
         System.out.println();
         System.out.println(BOLD + "Approaches compared:" + RESET);
         System.out.println("  " + GREEN + "direct" + RESET

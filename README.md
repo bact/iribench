@@ -65,7 +65,7 @@ sameas-bench-java smoke       # runs in-memory smoke test, ~20 s
 sameas-bench-java smoke                   # 3 toy versions, 4 packages each
 sameas-bench-java smoke --versions 5      # 5 toy versions
 sameas-bench-java smoke --no-owlrl        # skip reasoning expansion
-sameas-bench-java smoke --reasoner custom # use Bare minimum reasoner (custom)
+sameas-bench-java smoke --reasoner spdx-custom # use SPDX-optimized reasoner
 ```
 
 Good for development and CI. Completes in seconds.
@@ -86,7 +86,7 @@ Downloads SPDX 3.0.1 and 3.1 TTLs on first run (cached afterward).
 sameas-bench-java run                     # 5 versions, 25 packages, 3 repeats
 sameas-bench-java run --versions 3        # fewer versions
 sameas-bench-java run --reasoner jena-mini # use OWL Mini (default)
-sameas-bench-java run --reasoner custom    # use Bare minimum reasoner (custom) (recommended for performance)
+sameas-bench-java run --reasoner spdx-custom # use SPDX-optimized reasoner (recommended)
 ```
 
 #### Reasoner Options (`--reasoner`)
@@ -94,7 +94,7 @@ sameas-bench-java run --reasoner custom    # use Bare minimum reasoner (custom) 
 - `jena-mini` (Default): Jena's standard OWL Mini reasoner.
 - `jena-micro`: Lightweight OWL reasoner (faster than OWL Mini; but does not support `owl:sameAs`).
 - `jena-full`: Full OWL reasoner (slowest, most complete; better support of `owl:oneOf`, `owl:disjointWith`, etc. than OWL Mini).
-- `custom`: **Bare minimum reasoner (custom)**. A specialized, high-speed reasoner that only processes `owl:sameAs`, `owl:equivalentClass`, and `owl:equivalentProperty`. Optimized specifically for SPDX 3 identity hubbing. Use this for large-scale benchmarks where identity resolution is the primary requirement.
+- `spdx-custom`: **SPDX-optimized**. A specialized, high-speed reasoner that only processes `owl:sameAs`, `owl:equivalentClass`, and `owl:equivalentProperty`. Optimized specifically for SPDX 3 identity hubbing. **Note:** This reasoner is designed solely for identity linking; it does not support other OWL features and may not function correctly if SPDX is integrated with complex external ontologies. Use this for large-scale benchmarks where identity resolution is the primary requirement.
 
 ### `list-cache` / `clear-cache`
 
@@ -152,7 +152,7 @@ To ensure high-fidelity measurements and minimize JVM-induced noise, the benchma
 
 The Java version allows switching between several reasoning profiles via the `--reasoner` flag.
 
-- **Bare minimum reasoner (custom)** (recommended): Implemented via Jena's `GenericRuleReasoner`. This provides the optimal balance for SPDX identity management:
+- **SPDX-optimized** (recommended): Implemented via Jena's `GenericRuleReasoner`. This provides the optimal balance for SPDX identity management:
   - **Completeness**: Fully handles `owl:sameAs`, `owl:equivalentClass`, and `owl:equivalentProperty`.
   - **Efficiency**: Ignores 2000+ complex OWL restrictions that cause performance blowout in standard reasoners.
   - **Coverage**: Specifically implements transitivity for `subClassOf`/`subPropertyOf` and RDFS `domain`/`range` inference.
@@ -164,4 +164,4 @@ The Java version allows switching between several reasoning profiles via the `--
 
 The benchmark runner is instrumented to catch `OutOfMemoryError` and `QueryCancelledException` (timeouts). If a specific reasoning task exceeds available resources or the 5-minute safety threshold, the system records the error and proceeds to the next scenario.
 > [!TIP]
-> If you encounter timeouts with `jena-mini` or `jena-full`, try using `--reasoner jena-micro` or `--reasoner custom`.
+> If you encounter timeouts with `jena-mini` or `jena-full`, try using `--reasoner jena-micro` or `--reasoner spdx-custom`.

@@ -6,10 +6,16 @@ import org.apache.jena.reasoner.Reasoner;
 import org.apache.jena.reasoner.ReasonerRegistry;
 import org.apache.jena.rdf.model.InfModel;
 import org.apache.jena.riot.RDFDataMgr;
+import org.apache.jena.riot.Lang;
 import org.apache.jena.shacl.*;
+import org.apache.jena.vocabulary.OWL;
+import org.apache.jena.vocabulary.RDF;
+import org.apache.jena.vocabulary.RDFS;
 import cc.bact.sameasbench.Measurement;
 import cc.bact.sameasbench.datagen.SbomGenerator;
+import cc.bact.sameasbench.datagen.GeneratorConfig;
 import cc.bact.sameasbench.ontology.OntologyVersion;
+import cc.bact.sameasbench.ontology.EquivGraphBuilder;
 
 import org.apache.jena.reasoner.rulesys.*;
 import java.io.ByteArrayInputStream;
@@ -18,17 +24,6 @@ import java.util.*;
 
 public class BenchmarkRunner {
     
-    public enum ReasonerType {
-        FULL("Jena full OWL"),
-        MINI("Jena OWL Mini"),
-        MICRO("Jena OWL Micro"),
-        CUSTOM("Bare minimum (custom)");
-
-        private final String label;
-        ReasonerType(String label) { this.label = label; }
-        public String label() { return label; }
-    }
-
     // Using a 5-minute safety timeout to prevent reasoner blowout on complex ontologies
 
     // -------------------------------------------------------------------
@@ -80,13 +75,23 @@ public class BenchmarkRunner {
             case FULL -> reasoner = ReasonerRegistry.getOWLReasoner();
             case MINI -> reasoner = ReasonerRegistry.getOWLMiniReasoner();
             case MICRO -> reasoner = ReasonerRegistry.getOWLMicroReasoner();
-            case CUSTOM -> reasoner = getBareMinimumReasoner();
+            case SPDX_CUSTOM -> reasoner = getBareMinimumReasoner();
             default -> reasoner = getBareMinimumReasoner();
         }
         InfModel inf = ModelFactory.createInfModel(reasoner, combinedModel);
         return new ModelAndTimeout(inf, false);
     }
 
+    /**
+     * Bare-minimum rule-based reasoner for SPDX identity hubbing.
+     * WARNING: This is NOT a complete OWL reasoner. It only supports:
+     * - owl:equivalentClass / owl:equivalentProperty
+     * - owl:sameAs
+     * - rdfs:subClassOf / rdfs:subPropertyOf (transitive)
+     * - rdfs:domain / rdfs:range
+     * It will NOT work for complex OWL features (oneOf, unionOf, etc.)
+     * and is intended solely for benchmarking identity resolution.
+     */
     private static Reasoner getBareMinimumReasoner() {
         String rdf = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
         String rdfs = "http://www.w3.org/2000/01/rdf-schema#";
@@ -339,7 +344,7 @@ public class BenchmarkRunner {
                 case FULL -> reasoner = ReasonerRegistry.getOWLReasoner();
                 case MINI -> reasoner = ReasonerRegistry.getOWLMiniReasoner();
                 case MICRO -> reasoner = ReasonerRegistry.getOWLMicroReasoner();
-                case CUSTOM -> reasoner = getBareMinimumReasoner();
+                case SPDX_CUSTOM -> reasoner = getBareMinimumReasoner();
                 default -> reasoner = getBareMinimumReasoner();
             }
             InfModel inf = ModelFactory.createInfModel(reasoner, wg);
