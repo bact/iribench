@@ -11,6 +11,7 @@ public class ScenarioResult {
     public long equivTriples;
     public long totalTriples;
     public Measurement buildMeasurement;
+    public Measurement expansionMeasurement;
     public EquivStats equivStats;
     public List<QueryResult> queries = new ArrayList<>();
     public List<ShaclResult> shacl   = new ArrayList<>();

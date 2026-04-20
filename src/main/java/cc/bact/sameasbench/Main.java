@@ -71,7 +71,7 @@ public class Main implements Runnable {
         @Option(names = "--no-owlrl", description = "Skip reasoning expansion queries.")
         boolean skipOwlrl;
         @Option(names = "--reasoner", defaultValue = "jena-mini", 
-                description = "Reasoner: jena-full, jena-mini (default), jena-micro, or spdx-custom.")
+                description = "Reasoner: jena-full, jena-mini (default), jena-micro, or spdx-custom (recommended).")
         String reasoner = "jena-mini";
         @Option(names = {"-v","--verbose"}, defaultValue = "true", description = "Show per-step progress.")
         boolean verbose = true;
@@ -98,7 +98,7 @@ public class Main implements Runnable {
         @Option(names = "--owlrl", description = "Force reasoning even in quick mode.")
         boolean forceOwlrl;
         @Option(names = "--reasoner", defaultValue = "jena-mini", 
-                description = "Reasoner: jena-full, jena-mini, jena-micro, or spdx-custom.")
+                description = "Reasoner: jena-full, jena-mini, jena-micro, or spdx-custom (recommended).")
         String reasoner = "jena-mini";
         @Option(names = {"-v","--verbose"}, defaultValue = "true") boolean verbose = true;
 
@@ -123,7 +123,7 @@ public class Main implements Runnable {
         @Option(names = "--no-owlrl", description = "Skip reasoning expansion queries.")
         boolean skipOwlrl;
         @Option(names = "--reasoner", defaultValue = "jena-mini", 
-                description = "Reasoner: jena-full, jena-mini, jena-micro, or spdx-custom.")
+                description = "Reasoner: jena-full, jena-mini, jena-micro, or spdx-custom (recommended).")
         String reasoner = "jena-mini";
 
         @Override public void run() {

@@ -182,13 +182,15 @@ public class ReportPrinter {
         System.out.println();
         System.out.println(BOLD + "Graph Statistics" + RESET);
         AsciiTable t = new AsciiTable("Namespace\nscenario", "Vers", "Data\nTriples",
-                "Equiv\nTriples", "Total\nTriples", "Build Time\n(ms)", "Build Mem\n(MB)");
+                "Equiv\nTriples", "Total\nTriples", "Build Time\n(ms)", "Inf Exp\n(ms)", "Build Mem\n(MB)");
         for (ScenarioResult r : results) {
             t.addRow(r.scenarioName, String.valueOf(r.versionsCount),
                     String.format("%,d", r.dataTriples),
                     r.equivTriples > 0 ? String.format("%,d", r.equivTriples) : "-",
                     String.format("%,d", r.totalTriples),
                     r.buildMeasurement != null ? String.format("%.1f", r.buildMeasurement.wallMs)
+                            : "-",
+                    r.expansionMeasurement != null ? String.format("%.1f", r.expansionMeasurement.wallMs)
                             : "-",
                     r.buildMeasurement != null
                             ? String.format("%.1f", r.buildMeasurement.peakMemoryMb)

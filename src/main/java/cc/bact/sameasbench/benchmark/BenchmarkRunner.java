@@ -29,21 +29,51 @@ public class BenchmarkRunner {
     // -------------------------------------------------------------------
     // Internal: run SPARQL, return row count
     // -------------------------------------------------------------------
-    private static int runQuery(Model model, String sparql) {
-        // Use a watchdog thread to ensure qe.abort() is called even if the reasoner hangs.
-        // We rely on the watchdog because qe.setTimeout is no longer standard in Jena 6.0 interface.
-        try (QueryExecution qe = QueryExecutionFactory.create(sparql, model)) {
-            java.util.concurrent.ScheduledExecutorService watchdog =
-                    java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
-            try {
-                // Schedule a hard abort after 300s
-                watchdog.schedule(() -> {
-                    try {
-                        qe.abort();
-                    } catch (Exception ignored) {
-                    }
-                }, 300, java.util.concurrent.TimeUnit.SECONDS);
+    private static final java.util.concurrent.ExecutorService BENCH_EXECUTOR = 
+        java.util.concurrent.Executors.newCachedThreadPool(r -> {
+            Thread t = new Thread(r, "Bench-Worker");
+            t.setDaemon(true);
+            return t;
+        });
 
+    /**
+     * Runs a task with a hard 300s (5-minute) timeout.
+     * Returns the result or throws QueryCancelledException on timeout.
+     */
+    private static <T> T runWithTimeout(java.util.concurrent.Callable<T> task, Runnable onCancel) throws Exception {
+        java.util.concurrent.CompletableFuture<T> future = 
+            java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                try {
+                    return task.call();
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }, BENCH_EXECUTOR);
+
+        try {
+            return future.get(300, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            if (onCancel != null) onCancel.run();
+            future.cancel(true);
+            throw new org.apache.jena.query.QueryCancelledException();
+        } catch (java.util.concurrent.ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException && cause.getCause() instanceof Exception) {
+                throw (Exception) cause.getCause();
+            }
+            if (cause instanceof Exception) throw (Exception) cause;
+            throw new RuntimeException(cause);
+        } catch (InterruptedException e) {
+            if (onCancel != null) onCancel.run();
+            future.cancel(true);
+            Thread.currentThread().interrupt();
+            throw new org.apache.jena.query.QueryCancelledException();
+        }
+    }
+
+    private static int runQuery(Model model, String sparql) {
+        try (QueryExecution qe = QueryExecutionFactory.create(sparql, model)) {
+            return runWithTimeout(() -> {
                 ResultSet rs = qe.execSelect();
                 int count = 0;
                 while (rs.hasNext()) {
@@ -51,16 +81,14 @@ public class BenchmarkRunner {
                     count++;
                 }
                 return count;
-            } finally {
-                watchdog.shutdownNow();
-            }
+            }, () -> qe.abort());
         } catch (org.apache.jena.query.QueryCancelledException e) {
             throw e;
         } catch (Exception e) {
-            if (e.getMessage() != null && e.getMessage().contains("aborted")) {
-                throw new org.apache.jena.query.QueryCancelledException();
+            if (e instanceof RuntimeException re && re.getCause() instanceof org.apache.jena.query.QueryCancelledException) {
+                throw (org.apache.jena.query.QueryCancelledException) re.getCause();
             }
-            throw e;
+            throw new RuntimeException(e);
         }
     }
 
@@ -68,7 +96,7 @@ public class BenchmarkRunner {
     // Internal: configure OWL reasoner
     // Returns (infModel, timedOut=false)
     // -------------------------------------------------------------------
-    private static ModelAndTimeout expandOwlRl(Model combinedModel, ReasonerType type) {
+    private static InfModel expandOwlRl(Model combinedModel, ReasonerType type) {
         Reasoner reasoner;
         if (type == null) type = ReasonerType.MINI;
         switch (type) {
@@ -78,8 +106,30 @@ public class BenchmarkRunner {
             case SPDX_CUSTOM -> reasoner = getBareMinimumReasoner();
             default -> reasoner = getBareMinimumReasoner();
         }
-        InfModel inf = ModelFactory.createInfModel(reasoner, combinedModel);
-        return new ModelAndTimeout(inf, false);
+        return ModelFactory.createInfModel(reasoner, combinedModel);
+    }
+
+    private static Measurement prepareInference(InfModel inf, boolean verbose) {
+        if (verbose) {
+            System.out.print("    Inference expansion ... ");
+            System.out.flush();
+        }
+        try {
+            Measurement m = Measurement.measure(() -> {
+                runWithTimeout(() -> {
+                    inf.prepare();
+                    return null;
+                }, null);
+            });
+            if (verbose) System.out.printf("[%.1f ms]\n", m.wallMs);
+            return m;
+        } catch (org.apache.jena.query.QueryCancelledException e) {
+            if (verbose) System.out.println("[TIMEOUT]");
+            return new Measurement(300000, 0);
+        } catch (Exception e) {
+            if (verbose) System.out.println("[ERROR]");
+            return new Measurement(0, 0);
+        }
     }
 
     /**
@@ -131,14 +181,9 @@ public class BenchmarkRunner {
     // Internal: bench one query
     // -------------------------------------------------------------------
     private static QueryResult benchQuery(Model model, String name, String method, String sparql,
-            int repeats, boolean expandOwl, ReasonerType reasonerType, boolean verbose) {
-        Model targetModel = null;
+            int repeats, ReasonerType reasonerType, boolean verbose) {
         try {
-            targetModel = model;
-            if (expandOwl) {
-                targetModel = expandOwlRl(model, reasonerType).model();
-            }
-
+            Model targetModel = model;
             // Cold start protection: run the query once and discard the result.
             // This primes the SPARQL engine and the reasoner for this specific query.
             runQuery(targetModel, sparql);
@@ -182,8 +227,8 @@ public class BenchmarkRunner {
     // -------------------------------------------------------------------
     // Internal: run SHACL
     // -------------------------------------------------------------------
-    private static ShaclResult benchShacl(Model dataModel, String name, String shapesTtl,
-            String inference, ReasonerType reasonerType, int repeats, boolean verbose) {
+    private static ShaclResult benchShacl(Model queryModel, String name, String shapesTtl,
+            int repeats, boolean verbose) {
         try {
             List<Measurement> measurements = new ArrayList<>();
             boolean conforms = false;
@@ -203,19 +248,11 @@ public class BenchmarkRunner {
                         if (s.getObject().isURIResource())
                             targetClassUris.add(s.getObject().asResource().getURI());
                     });
-            Model queryModel = null;
+            
             try {
-                queryModel = inference.equals("owlrl") ? expandOwlRl(dataModel, reasonerType).model() : dataModel;
-
                 for (String tc : targetClassUris) {
                     String q = "SELECT DISTINCT ?x WHERE { ?x a <" + tc + "> }";
-                    try (QueryExecution qe = QueryExecution.model(queryModel).query(q).build()) {
-                        ResultSet rs = qe.execSelect();
-                        while (rs.hasNext()) {
-                            rs.nextSolution();
-                            targetCount++;
-                        }
-                    }
+                    targetCount += runQuery(queryModel, q);
                 }
 
                 // Parse shapes once outside the measurement loop
@@ -226,16 +263,21 @@ public class BenchmarkRunner {
                 Shapes shapes = Shapes.parse(sm);
 
                 // Cold start protection: run validation once and discard
-                ShaclValidator.get().validate(shapes, queryModel.getGraph());
+                final Model finalQModel = queryModel;
+                runWithTimeout(() -> {
+                    ShaclValidator.get().validate(shapes, finalQModel.getGraph());
+                    return null;
+                }, null);
 
-                final Model finalModel = queryModel;
                 for (int i = 0; i < repeats; i++) {
                     Measurement.MeasuredResult<ShaclIterResult> mr =
                             Measurement.measureWithResult(() -> {
-                                ValidationReport report = ShaclValidator.get().validate(shapes,
-                                        finalModel.getGraph());
-                                int v = report.getEntries().size();
-                                return new ShaclIterResult(report.conforms(), v);
+                                return runWithTimeout(() -> {
+                                    ValidationReport report = ShaclValidator.get().validate(shapes,
+                                            finalQModel.getGraph());
+                                    int v = report.getEntries().size();
+                                    return new ShaclIterResult(report.conforms(), v);
+                                }, null);
                             });
                     if (verbose) {
                         System.out.print(".");
@@ -246,7 +288,7 @@ public class BenchmarkRunner {
                     violations = mr.value().violations();
                 }
 
-                return new ShaclResult(name, inference, conforms, violations, targetCount,
+                return new ShaclResult(name, "shacl", conforms, violations, targetCount,
                         Measurement.average(measurements), null);
             } catch (Throwable t) {
                 if (verbose) {
@@ -255,10 +297,10 @@ public class BenchmarkRunner {
                 }
                 if (t instanceof OutOfMemoryError) {
                     System.gc();
-                    return new ShaclResult(name, inference, false, 0, 0, new Measurement(0, 0),
+                    return new ShaclResult(name, "shacl", false, 0, 0, new Measurement(0, 0),
                             "OOM: " + getHeapConfig());
                 }
-                return new ShaclResult(name, inference, false, 0, 0, new Measurement(0, 0),
+                return new ShaclResult(name, "shacl", false, 0, 0, new Measurement(0, 0),
                         t.toString());
             }
         } catch (Throwable t) {
@@ -268,10 +310,10 @@ public class BenchmarkRunner {
             }
             if (t instanceof OutOfMemoryError) {
                 System.gc();
-                return new ShaclResult(name, inference, false, 0, 0, new Measurement(0, 0),
+                return new ShaclResult(name, "shacl", false, 0, 0, new Measurement(0, 0),
                         "OOM: " + getHeapConfig());
             }
-            return new ShaclResult(name, inference, false, 0, 0, new Measurement(0, 0),
+            return new ShaclResult(name, "shacl", false, 0, 0, new Measurement(0, 0),
                     t.toString());
         }
     }
@@ -338,18 +380,11 @@ public class BenchmarkRunner {
         }
         // 2. OWL-RL on representative graph
         if (owlEnabled) {
-            Reasoner reasoner;
-            if (reasonerType == null) reasonerType = ReasonerType.MINI;
-            switch (reasonerType) {
-                case FULL -> reasoner = ReasonerRegistry.getOWLReasoner();
-                case MINI -> reasoner = ReasonerRegistry.getOWLMiniReasoner();
-                case MICRO -> reasoner = ReasonerRegistry.getOWLMicroReasoner();
-                case SPDX_CUSTOM -> reasoner = getBareMinimumReasoner();
-                default -> reasoner = getBareMinimumReasoner();
-            }
-            InfModel inf = ModelFactory.createInfModel(reasoner, wg);
-            Model mat = ModelFactory.createDefaultModel();
-            mat.add(inf);
+            InfModel inf = expandOwlRl(wg, reasonerType);
+            // Run expansion twice during warmup to ensure JIT is fully primed
+            inf.prepare();
+            inf.rebind();
+            inf.prepare();
         }
         // 3. SHACL with representative shapes
         String warmupShapes = ShaclShapes.makeShapes(sharedBase);
@@ -447,12 +482,19 @@ public class BenchmarkRunner {
         int totalTasks = queries.size() + (owlEnabled ? queries.size() : 0) + 1;
         int currentTask = 1;
 
+        InfModel inferenceModel = owlEnabled ? expandOwlRl(combinedModel, reasonerType) : null;
+        boolean owlTimedOut = false;
+        if (owlEnabled) {
+            result.expansionMeasurement = prepareInference(inferenceModel, verbose);
+            owlTimedOut = result.expansionMeasurement.wallMs >= 300000;
+        }
+
         for (String[] q : queries) {
             if (verbose) {
                 System.out.printf("    [%d/%d] %s ", currentTask++, totalTasks, q[0]);
                 System.out.flush();
             }
-            QueryResult qr = benchQuery(dataModel, q[0], "direct", q[1], repeats, false, reasonerType, verbose);
+            QueryResult qr = benchQuery(dataModel, q[0], "direct", q[1], repeats, reasonerType, verbose);
             result.queries.add(qr);
             if (verbose)
                 System.out.printf(" [%.1f ms]\n", qr.measurement().wallMs);
@@ -464,8 +506,13 @@ public class BenchmarkRunner {
                     System.out.printf("    [%d/%d] %s (%s) ", currentTask++, totalTasks, q[0], reasonerType.label());
                     System.out.flush();
                 }
-                QueryResult qr =
-                        benchQuery(combinedModel, q[0], "owlrl", q[1], repeats, true, reasonerType, verbose);
+                QueryResult qr;
+                if (owlTimedOut) {
+                    qr = new QueryResult(q[0], "owlrl", 0, new Measurement(300000, 0), true, null);
+                    if (verbose) System.out.print(" [SKIPPED due to expansion timeout] ");
+                } else {
+                    qr = benchQuery(inferenceModel, q[0], "owlrl", q[1], repeats, reasonerType, verbose);
+                }
                 result.queries.add(qr);
                 if (verbose)
                     System.out.printf(" [%.1f ms]\n", qr.measurement().wallMs);
@@ -478,8 +525,7 @@ public class BenchmarkRunner {
                     totalTasks);
             System.out.flush();
         }
-        ShaclResult sr = benchShacl(dataModel, "Package + Relationship shapes", shapesTtl, "none",
-                reasonerType, repeats, verbose);
+        ShaclResult sr = benchShacl(dataModel, "Package + Relationship shapes", shapesTtl, repeats, verbose);
         result.shacl.add(sr);
         if (verbose)
             System.out.printf(" [%.1f ms]\n", sr.measurement().wallMs);
@@ -582,12 +628,19 @@ public class BenchmarkRunner {
         int totalTasks = unionQueries.size() + (owlEnabled ? canonicalQueries.size() : 0) + 2;
         int currentTask = 1;
 
+        InfModel inferenceModel = owlEnabled ? expandOwlRl(combinedModel, reasonerType) : null;
+        boolean owlTimedOut = false;
+        if (owlEnabled) {
+            result.expansionMeasurement = prepareInference(inferenceModel, verbose);
+            owlTimedOut = result.expansionMeasurement.wallMs >= 300000;
+        }
+
         for (String[] q : unionQueries) {
             if (verbose) {
                 System.out.printf("    [%d/%d] %s (UNION) ", currentTask++, totalTasks, q[0]);
                 System.out.flush();
             }
-            QueryResult qr = benchQuery(dataModel, q[0], "union", q[1], repeats, false, reasonerType, verbose);
+            QueryResult qr = benchQuery(dataModel, q[0], "union", q[1], repeats, reasonerType, verbose);
             result.queries.add(qr);
             if (verbose)
                 System.out.printf(" [%.1f ms]\n", qr.measurement().wallMs);
@@ -599,8 +652,13 @@ public class BenchmarkRunner {
                     System.out.printf("    [%d/%d] %s (%s) ", currentTask++, totalTasks, q[0], reasonerType.label());
                     System.out.flush();
                 }
-                QueryResult qr =
-                        benchQuery(combinedModel, q[0], "owlrl", q[1], repeats, true, reasonerType, verbose);
+                QueryResult qr;
+                if (owlTimedOut) {
+                    qr = new QueryResult(q[0], "owlrl", 0, new Measurement(300000, 0), true, null);
+                    if (verbose) System.out.print(" [SKIPPED due to expansion timeout] ");
+                } else {
+                    qr = benchQuery(inferenceModel, q[0], "owlrl", q[1], repeats, reasonerType, verbose);
+                }
                 result.queries.add(qr);
                 if (verbose)
                     System.out.printf(" [%.1f ms]\n", qr.measurement().wallMs);
@@ -620,7 +678,7 @@ public class BenchmarkRunner {
         }
         ShaclResult sr1 = benchShacl(dataModel,
                 "Per-version shapes, no inference (shapes target each versioned IRI)",
-                versionedShapesTtl, "none", reasonerType, repeats, verbose);
+                versionedShapesTtl, repeats, verbose);
         result.shacl.add(sr1);
         if (verbose)
             System.out.printf(" [%.1f ms]\n", sr1.measurement().wallMs);
@@ -632,8 +690,14 @@ public class BenchmarkRunner {
                     totalTasks, reasonerType.label());
             System.out.flush();
         }
-        ShaclResult sr2 = benchShacl(combinedModel, "Canonical shapes + OWL-RL", canonicalShapesTtl,
-                "owlrl", reasonerType, repeats, verbose);
+        
+        ShaclResult sr2;
+        if (owlTimedOut) {
+             sr2 = new ShaclResult("Canonical shapes + OWL-RL", "shacl", false, 0, 0, new Measurement(300000, 0), "SKIPPED due to expansion timeout");
+             if (verbose) System.out.print(" [SKIPPED due to expansion timeout] ");
+        } else {
+             sr2 = benchShacl(inferenceModel, "Canonical shapes + OWL-RL", canonicalShapesTtl, repeats, verbose);
+        }
         result.shacl.add(sr2);
         if (verbose)
             System.out.printf(" [%.1f ms]\n", sr2.measurement().wallMs);

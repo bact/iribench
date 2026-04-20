@@ -109,7 +109,7 @@ sameas-bench-java clear-cache   # delete cached TTLs (forces re-download on next
 
 | Section | What it measures |
 | ------- | ---------------- |
-| **Graph Statistics** | Triple counts and build time per scenario |
+| **Graph Statistics** | Triple counts, build time, and **Inference Expansion** time (`Inf Exp`) per scenario |
 | **Equivalence Breakdown** | `owl:equivalentClass` / `equivalentProperty` / `sameAs` counts |
 | **SPARQL Query Results** | `direct` vs `union` vs `owlrl` (Selected Reasoner) — wall time and row counts |
 | **SHACL Validation** | Per-version shapes (no inference) vs canonical shapes + Selected Reasoner |
@@ -144,7 +144,8 @@ To ensure high-fidelity measurements and minimize JVM-induced noise, the benchma
 1. **Global engine warmup**: Before any measurements begin, the JVM and Jena's query/reasoner engines are primed with a synthetic workload. This ensures that JIT compilation and internal engine caches are steady.
 2. **Cold-start protection**: Within each scenario, every distinct SPARQL query and SHACL validation is executed once (unmeasured) before the timing repeats start. This isolates the execution performance from the initial parsing and planning phase.
 3. **Preemptive garbage collection**: `System.gc()` is explicitly invoked before each scenario block begins. This clears out models and triples from previous scenarios, ensuring that each benchmark starts with a clean heap and reducing the likelihood of a major GC pause during measurement.
-4. **Inference engine reuse**: For reasoning scenarios, the `InfModel` is expanded once outside the measurement loop. This allows us to measure the "hot" performance of the backward-chaining engine rather than the one-time rule setup overhead.
+4. **Inference engine reuse**: For reasoning scenarios, the `InfModel` is expanded once via `inf.prepare()` before any queries are measured. This allows us to measure the one-time **Inference Expansion** cost separately from the "hot" query performance of the engine.
+5. **Hard timeout protection**: Every reasoning and SHACL task is protected by a **5-minute (300s) safety timeout**. If a task exceeds this limit, it is aborted and marked as `[TIMEOUT]` or `[SKIPPED]`, ensuring the benchmark continues even if a reasoner enters an infinite loop or triggers a performance blowout.
 
 ---
 
