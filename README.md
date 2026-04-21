@@ -118,19 +118,24 @@ iribench clear-cache   # delete cached TTLs (forces re-download on next run)
 
 ## Three strategies compared
 
-| Strategy | How it works | Scales with versions |
-| -------- | ------------ | -------------------- |
-| `direct` | All data uses shared canonical IRI — no equivalences needed | O(1) |
-| `union` | Each version has own IRI; query has one UNION branch per version | O(N) |
-| `owlrl` | Selected Reasoner hub graph + Backward Chaining (on-the-fly), then canonical query | super-linear |
+| Strategy | How it works | Effective complexity | Notes |
+| -------- | ------------ | ---------- | ----- |
+| `direct` | All data uses shared canonical IRI — no equivalences needed | O(log N) | N is size of data |
+| `union` | Each version has own IRI; query has one UNION branch per version | O(V ⋅ log N) | V is number of ontology versions |
+| `owlrl` | Selected Reasoner hub graph + Backward Chaining (on-the-fly), then canonical query | O(V ⋅ N<sup>k</sup>) | k is depth of schema rule |
+
+Notes:
+
+- *N* effectively becomes *log N* for `direct` and `union` because of indexing. `owlrl` reasoning requires data-driven joins that indexes alone cannot bypass.
+- *k* stays at 2 in SPDX 3.0 and 3.1 cases, as they only use `owl:sameAs`, `owl:equivalentClass`, and `owl:equivalentProperty` which are all 2-way joins.
 
 ---
 
 ## Building from source (without install)
 
 ```bash
-./mvnw package -q                              # builds target/iribench.jar
-java -jar target/iribench.jar smoke        # run directly
+./mvnw package -q                        # builds target/iribench.jar
+java -jar target/iribench.jar smoke      # run directly
 ```
 
 ---
