@@ -110,7 +110,8 @@ public class ReportPrinter {
     // -------------------------------------------------------------------
     public static void printAll(List<ScenarioResult> results, int pkgPerVersion, int repeats,
             String sharedBase, ReasonerType reasonerType) {
-        if (reasonerType == null) reasonerType = ReasonerType.MINI;
+        if (reasonerType == null)
+            reasonerType = ReasonerType.MINI;
         printHeader(reasonerType);
         printMethodology(reasonerType);
         printGraphStats(results);
@@ -130,8 +131,8 @@ public class ReportPrinter {
         System.out.println(BOLD + CYAN
                 + "========================================================================"
                 + RESET);
-        System.out.println(BOLD + CYAN
-                + "  iribench — SPDX Versioned IRI Overhead Benchmark" + RESET);
+        System.out.println(
+                BOLD + CYAN + "  iribench — SPDX Versioned IRI Overhead Benchmark" + RESET);
         System.out.println(
                 BOLD + CYAN + "  Apache Jena 6.0  |  " + label + "  |  jena-shacl" + RESET);
         System.out.println(BOLD + CYAN
@@ -149,8 +150,8 @@ public class ReportPrinter {
                 + "    All SBOMs use shared canonical IRI https://spdx.org/rdf/3/terms/");
         System.out.println("  " + YELLOW + "union" + RESET
                 + "     Each SPDX version has its own IRI prefix; queries use SPARQL UNION");
-        System.out.println("  " + CYAN + "owlrl" + RESET
-                + "     " + reasonerType.label() + " + backward chaining (on-the-fly), then canonical query");
+        System.out.println("  " + CYAN + "owlrl" + RESET + "     " + reasonerType.label()
+                + " + backward chaining (on-the-fly), then canonical query");
         System.out.println();
         System.out.println("  " + BOLD + "Example (Counting Software instances):" + RESET);
         System.out.println("  " + GREEN + "direct" + RESET
@@ -167,7 +168,7 @@ public class ReportPrinter {
         System.out.println("  - Wall time includes JVM overhead; CPU time is per-thread");
 
         System.out.println();
-        System.out.println(BOLD + "Accuracy Strategy:" + RESET);
+        System.out.println(BOLD + "Accuracy strategy:" + RESET);
         System.out.println("  - " + BOLD + "Warmup:" + RESET + " Engines primed before timing.");
         System.out.println(
                 "  - " + BOLD + "Isolation:" + RESET + " System.gc() before each scenario block.");
@@ -180,9 +181,10 @@ public class ReportPrinter {
     // -------------------------------------------------------------------
     private static void printGraphStats(List<ScenarioResult> results) {
         System.out.println();
-        System.out.println(BOLD + "Graph Statistics" + RESET);
-        AsciiTable t = new AsciiTable("Namespace\nscenario", "Vers", "Data\nTriples",
-                "Equiv\nTriples", "Total\nTriples", "Build Time\n(ms)", "Inf Exp\n(ms)", "Build Mem\n(MB)");
+        System.out.println(BOLD + "Graph statistics" + RESET);
+        AsciiTable t =
+                new AsciiTable("Namespace\nscenario", "Vers", "Data\nTriples", "Equiv\nTriples",
+                        "Total\nTriples", "Build Time\n(ms)", "Inf Exp\n(ms)", "Build Mem\n(MB)");
         for (ScenarioResult r : results) {
             t.addRow(r.scenarioName, String.valueOf(r.versionsCount),
                     String.format("%,d", r.dataTriples),
@@ -190,7 +192,8 @@ public class ReportPrinter {
                     String.format("%,d", r.totalTriples),
                     r.buildMeasurement != null ? String.format("%.1f", r.buildMeasurement.wallMs)
                             : "-",
-                    r.expansionMeasurement != null ? String.format("%.1f", r.expansionMeasurement.wallMs)
+                    r.expansionMeasurement != null
+                            ? String.format("%.1f", r.expansionMeasurement.wallMs)
                             : "-",
                     r.buildMeasurement != null
                             ? String.format("%.1f", r.buildMeasurement.peakMemoryMb)
@@ -209,7 +212,7 @@ public class ReportPrinter {
             return;
 
         System.out.println();
-        System.out.println(BOLD + "Equivalence Graph Breakdown" + RESET);
+        System.out.println(BOLD + "Equivalence graph breakdown" + RESET);
         AsciiTable t =
                 new AsciiTable("Namespace\nscenario", "equiv:Class\npairs", "equiv:Prop\npairs",
                         "sameAs\npairs", "Total\nClasses", "Total\nProps", "Total\nIndivs");
@@ -228,7 +231,7 @@ public class ReportPrinter {
     // -------------------------------------------------------------------
     private static void printSparqlResults(List<ScenarioResult> results) {
         System.out.println();
-        System.out.println(BOLD + "SPARQL Query Results" + RESET);
+        System.out.println(BOLD + "SPARQL query results" + RESET);
 
         // Collect all distinct query names (preserving order)
         List<String> queryNames = new ArrayList<>();
@@ -287,7 +290,8 @@ public class ReportPrinter {
                     }
 
                     t.addRow(r.scenarioName, methodColored(q.method()),
-                            (q.error() != null || q.measurement() == null) ? "-" : String.format("%.1f", q.measurement().wallMs),
+                            (q.error() != null || q.measurement() == null) ? "-"
+                                    : String.format("%.1f", q.measurement().wallMs),
                             rowStr, status);
                 }
             }
@@ -309,7 +313,7 @@ public class ReportPrinter {
     // -------------------------------------------------------------------
     private static void printShaclResults(List<ScenarioResult> results) {
         System.out.println();
-        System.out.println(BOLD + "SHACL Validation Results" + RESET);
+        System.out.println(BOLD + "SHACL validation results" + RESET);
 
         Map<Integer, ScenarioResult> baselines =
                 results.stream().filter(r -> r.scenarioName.startsWith("Shared ("))
@@ -338,7 +342,8 @@ public class ReportPrinter {
                         s.error() != null ? "-"
                                 : (s.conforms() ? GREEN + "yes" + RESET : RED + "NO" + RESET),
                         s.error() != null ? "-" : String.valueOf(s.violationCount()), targetStr,
-                        (s.error() != null || s.measurement() == null) ? "-" : String.format("%.1f", s.measurement().wallMs),
+                        (s.error() != null || s.measurement() == null) ? "-"
+                                : String.format("%.1f", s.measurement().wallMs),
                         status);
             }
         }
@@ -350,7 +355,7 @@ public class ReportPrinter {
     // -------------------------------------------------------------------
     private static void printSummary(List<ScenarioResult> results) {
         System.out.println();
-        System.out.println(BOLD + "Summary — Overhead vs Shared Namespace" + RESET);
+        System.out.println(BOLD + "Summary — Overhead vs Shared namespace" + RESET);
 
         // Map shared baselines by version count
         Map<Integer, ScenarioResult> baselines =
@@ -419,7 +424,8 @@ public class ReportPrinter {
                 }
 
                 t.addRow(r.scenarioName, q.name(), methodColored(q.method()),
-                        (q.error() != null || q.measurement() == null) ? "-" : String.format("%.1f", q.measurement().wallMs),
+                        (q.error() != null || q.measurement() == null) ? "-"
+                                : String.format("%.1f", q.measurement().wallMs),
                         ratio, rowStr);
             }
         }
