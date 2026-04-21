@@ -116,7 +116,7 @@ public class ReportPrinter {
         printMethodology(reasonerType);
         printGraphStats(results);
         printEquivBreakdown(results);
-        printSparqlResults(results);
+        printSparqlResults(results, sharedBase);
         printShaclResults(results);
         printSummary(results);
         printComputingEnv(results);
@@ -174,6 +174,8 @@ public class ReportPrinter {
                 "  - " + BOLD + "Isolation:" + RESET + " System.gc() before each scenario block.");
         System.out.println("  - " + BOLD + "Protection:" + RESET
                 + " Unmeasured discarded first-run per query.");
+        System.out.println("  - " + BOLD + "Rows calculation:" + RESET
+                + " (Base x V + Inf) where Base=SharedDirect, Inf=Inferred.");
     }
 
     // -------------------------------------------------------------------
@@ -229,7 +231,7 @@ public class ReportPrinter {
     // -------------------------------------------------------------------
     // 5. SPARQL results
     // -------------------------------------------------------------------
-    private static void printSparqlResults(List<ScenarioResult> results) {
+    private static void printSparqlResults(List<ScenarioResult> results, String sharedBase) {
         System.out.println();
         System.out.println(BOLD + "SPARQL query results" + RESET);
 
@@ -248,13 +250,13 @@ public class ReportPrinter {
 
             // Collect all methods for this query across scenarios
             Map<Integer, ScenarioResult> baselines =
-                    results.stream().filter(res -> res.scenarioName.startsWith("Shared (")).collect(
+                    results.stream().filter(res -> res.scenarioName.endsWith("-shared")).collect(
                             Collectors.toMap(res -> res.versionsCount, res -> res, (a, b) -> a));
 
             AsciiTable t =
                     new AsciiTable("Namespace\nscenario", "Method", "Wall\nms", "Rows", "Status");
             for (ScenarioResult r : results) {
-                if ("Versioned (1)".equals(r.scenarioName))
+                if ("1-ver".equals(r.scenarioName))
                     continue;
 
                 ScenarioResult base = baselines.get(r.versionsCount);
@@ -269,18 +271,7 @@ public class ReportPrinter {
                     if (!q.name().equals(qname))
                         continue;
 
-                    String baseMethod = "union".equals(q.method()) ? "direct" : q.method();
-                    Integer baseR = baselineRows.get(q.name() + "|" + baseMethod);
-                    String rowStr;
-                    if (q.error() != null) {
-                        rowStr = "-";
-                    } else {
-                        rowStr = String.valueOf(q.resultCount());
-                        if (baseR != null && baseR > 0 && r != base
-                                && q.resultCount() == baseR * r.versionsCount) {
-                            rowStr += " " + DIM + "(" + baseR + "x" + r.versionsCount + ")" + RESET;
-                        }
-                    }
+                    String rowStr = formatRowCalculation(q, r, base, baselineRows);
 
                     String status = "ok";
                     if (q.error() != null) {
@@ -297,6 +288,47 @@ public class ReportPrinter {
             }
             t.print();
         }
+    }
+
+    private static String formatRowCalculation(QueryResult q, ScenarioResult r, ScenarioResult base,
+            Map<String, Integer> baselineRows) {
+        if (q.error() != null)
+            return "-";
+        int count = q.resultCount();
+        String s = String.valueOf(count);
+        if (base == null || count == 0)
+            return s;
+
+        int V = r.versionsCount;
+        Integer directBase = baselineRows.get(q.name() + "|direct");
+        Integer owlrlBase = baselineRows.get(q.name() + "|owlrl");
+
+        if ("owlrl".equals(q.method())) {
+            if (r == base) {
+                // Baseline: Show (Direct + Inferred)
+                if (directBase != null && count > directBase) {
+                    return s + " " + DIM + "(" + directBase + "+" + (count - directBase) + ")" + RESET;
+                }
+            } else if (owlrlBase != null && owlrlBase > 0) {
+                // Versioned Pattern 1: Distributed Inference (Expansion multiplies by V)
+                if (count == owlrlBase * V) {
+                    return s + " " + DIM + "(" + owlrlBase + "x" + V + ")" + RESET;
+                }
+                // Versioned Pattern 2: Hubbed Inference (Data multiplies, expansion is canonical)
+                if (directBase != null) {
+                    int inf = owlrlBase - directBase;
+                    if (inf > 0 && count == (directBase * V) + inf) {
+                        return s + " " + DIM + "(" + directBase + "x" + V + "+" + inf + ")" + RESET;
+                    }
+                }
+            }
+        } else if ("union".equals(q.method()) && r != base) {
+            if (directBase != null && directBase > 0 && count == directBase * V) {
+                return s + " " + DIM + "(" + directBase + "x" + V + ")" + RESET;
+            }
+        }
+
+        return s;
     }
 
     private static String methodColored(String method) {
@@ -316,13 +348,13 @@ public class ReportPrinter {
         System.out.println(BOLD + "SHACL validation results" + RESET);
 
         Map<Integer, ScenarioResult> baselines =
-                results.stream().filter(r -> r.scenarioName.startsWith("Shared ("))
+                results.stream().filter(r -> r.scenarioName.endsWith("-shared"))
                         .collect(Collectors.toMap(r -> r.versionsCount, r -> r, (a, b) -> a));
 
         AsciiTable t = new AsciiTable("Namespace\nscenario", "Shapes config", "Inference",
                 "Conforms?", "Violations", "Targets", "Wall\nms", "Status");
         for (ScenarioResult r : results) {
-            if ("Versioned (1)".equals(r.scenarioName))
+            if ("1-ver".equals(r.scenarioName))
                 continue;
 
             ScenarioResult base = baselines.get(r.versionsCount);
@@ -359,7 +391,7 @@ public class ReportPrinter {
 
         // Map shared baselines by version count
         Map<Integer, ScenarioResult> baselines =
-                results.stream().filter(r -> r.scenarioName.startsWith("Shared ("))
+                results.stream().filter(r -> r.scenarioName.endsWith("-shared"))
                         .collect(Collectors.toMap(r -> r.versionsCount, r -> r, (a, b) -> a));
 
         if (baselines.isEmpty()) {
@@ -368,9 +400,9 @@ public class ReportPrinter {
         }
 
         AsciiTable t = new AsciiTable("Namespace\nscenario", "Query", "Method", "Wall\nms",
-                "vs.\nbaseline", "Rows");
+                "vs.\nbaseline", "Rows", "Notes");
         for (ScenarioResult r : results) {
-            if ("Versioned (1)".equals(r.scenarioName))
+            if ("1-ver".equals(r.scenarioName))
                 continue;
 
             ScenarioResult base = baselines.get(r.versionsCount);
@@ -388,22 +420,24 @@ public class ReportPrinter {
             }
 
             for (QueryResult q : r.queries) {
+                String calcStr = formatRowCalculation(q, r, base, baselineRows);
                 String baseMethod = "union".equals(q.method()) ? "direct" : q.method();
                 Double baselineT = baselineTime.get(q.name() + "|" + baseMethod);
-                Integer baseR = baselineRows.get(q.name() + "|" + baseMethod);
+                Integer directBase = baselineRows.get(q.name() + "|direct");
+                Integer owlrlBase = baselineRows.get(q.name() + "|owlrl");
 
                 String ratio;
                 if (q.error() != null) {
                     ratio = RED + "ERROR" + RESET;
                 } else if (baselineT != null && baselineT > 0) {
-                    double x = q.measurement().wallMs / baselineT;
-                    if (r == base && x == 1.0) {
+                    double v = q.measurement().wallMs / baselineT;
+                    if (r == base && Math.abs(v - 1.0) < 0.001) {
                         ratio = DIM + "baseline" + RESET;
                     } else {
-                        ratio = String.format("%.2fx", x);
-                        if (x > 3.0)
+                        ratio = String.format("%.2fx", v);
+                        if (v > 2.0)
                             ratio = RED + ratio + RESET;
-                        else if (x > 1.5)
+                        else if (v > 1.2)
                             ratio = YELLOW + ratio + RESET;
                         else
                             ratio = GREEN + ratio + RESET;
@@ -412,24 +446,63 @@ public class ReportPrinter {
                     ratio = "-";
                 }
 
-                String rowStr;
-                if (q.error() != null) {
-                    rowStr = "-";
-                } else {
-                    rowStr = String.valueOf(q.resultCount());
-                    if (baseR != null && baseR > 0 && r != base
-                            && q.resultCount() == baseR * r.versionsCount) {
-                        rowStr += " " + DIM + "(" + baseR + "x" + r.versionsCount + ")" + RESET;
+                String note = "";
+                String baseNote = getInferenceNote(q.name());
+                boolean isVersioned = (r != base);
+                Integer dBase = directBase; // can be null
+
+                if ("owlrl".equals(q.method()) || !baseNote.equals("hubbing")) {
+                    int total = q.resultCount();
+                    int expectedData = (dBase == null) ? 0 : (isVersioned ? dBase * r.versionsCount : dBase);
+                    int inf = total - expectedData;
+
+                    if (!isVersioned) {
+                        // Baseline: "10 + hier 32"
+                        if (dBase != null && inf > 0) {
+                            note = DIM + dBase + " + " + baseNote + " " + inf + RESET;
+                        } else if (dBase != null && inf == 0 && !baseNote.equals("hubbing")) {
+                            note = DIM + baseNote + RESET;
+                        }
+                    } else {
+                        // Versioned
+                        if (calcStr.contains("x") && dBase != null) {
+                            // Exact match: "10x2 + hier 32" or just "10x2"
+                            String dataPart = dBase + "x" + r.versionsCount;
+                            if (inf > 0) {
+                                note = DIM + dataPart + " + " + baseNote + " " + inf + RESET;
+                            } else {
+                                note = DIM + baseNote + " (" + dataPart + ")" + RESET;
+                            }
+                        } else if (dBase != null) {
+                            // Approx match: "hier ≈(102x2)"
+                            Integer targetBase = ("owlrl".equals(q.method()) && owlrlBase != null) ? owlrlBase : dBase;
+                            note = DIM + baseNote + " ≈(" + targetBase + "x" + r.versionsCount + ")" + RESET;
+                        }
                     }
+                } else if (calcStr.contains("(")) {
+                    // union/direct patterns with no inference
+                    note = DIM + calcStr.substring(calcStr.indexOf("(")) + RESET;
                 }
 
                 t.addRow(r.scenarioName, q.name(), methodColored(q.method()),
                         (q.error() != null || q.measurement() == null) ? "-"
                                 : String.format("%.1f", q.measurement().wallMs),
-                        ratio, rowStr);
+                        ratio, String.valueOf(q.resultCount()), note);
             }
         }
         t.print();
+    }
+
+    private static String getInferenceNote(String qname) {
+        return switch (qname) {
+            case "Count elements by type", "subClassOf 1-hop: ?x a Core/Artifact",
+                    "subClassOf 2-hop: ?x a Core/Element" ->
+                "hier";
+            case "Element + leaf type (transitivity)" -> "hier + trans";
+            case "rdfs:domain: Core/from->Relationship" -> "domain";
+            case "Dependency chain (2-hop)" -> "trans";
+            default -> "hubbing";
+        };
     }
 
     // -------------------------------------------------------------------
@@ -437,7 +510,7 @@ public class ReportPrinter {
     // -------------------------------------------------------------------
     private static void printComputingEnv(List<ScenarioResult> results) {
         System.out.println();
-        System.out.println(BOLD + "Computing Environment" + RESET);
+        System.out.println(BOLD + "Computing environment" + RESET);
 
         String cpuBrand = getCpuBrand();
         int cpus = Runtime.getRuntime().availableProcessors();

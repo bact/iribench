@@ -118,16 +118,16 @@ iribench clear-cache   # delete cached TTLs (forces re-download on next run)
 
 ## Three strategies compared
 
-| Strategy | How it works | Effective complexity | Notes |
+| Strategy | How it works | Complexity | Notes |
 | -------- | ------------ | ---------- | ----- |
-| `direct` | All data uses shared canonical IRI — no equivalences needed | O(log N) | N is size of data |
-| `union` | Each version has own IRI; query has one UNION branch per version | O(V ⋅ log N) | V is number of ontology versions |
-| `owlrl` | Selected Reasoner hub graph + Backward Chaining (on-the-fly), then canonical query | O(V ⋅ N<sup>k</sup>) | k is depth of schema rule |
+| `direct` | All data uses shared canonical IRI — no equivalences needed | $O(N)$ | N is size of data |
+| `union` | Each version has own IRI; query has one UNION branch per version | $O(V \cdot N)$ | V is number of ontology versions |
+| `owlrl` | Selected Reasoner hub graph + Backward Chaining (on-the-fly), then canonical query | $O(V \cdot N^k)$ | k is depth of schema rule |
 
 Notes:
 
-- *N* effectively becomes *log N* for `direct` and `union` because of indexing. `owlrl` reasoning requires data-driven joins that indexes alone cannot bypass.
-- *k* stays at 2 in SPDX 3.0 and 3.1 cases, as they only use `owl:sameAs`, `owl:equivalentClass`, and `owl:equivalentProperty` which are all 2-way joins.
+- $N$ effectively becomes $\log N$ for `direct` and `union` because of indexing. `owlrl` reasoning requires data-driven joins that indexes alone cannot bypass.
+- $k$ stays at 2 in SPDX 3.0 and 3.1 cases, as they only use `owl:sameAs`, `owl:equivalentClass`, and `owl:equivalentProperty` which are all 2-way joins.
 
 ---
 
@@ -149,6 +149,19 @@ To ensure high-fidelity measurements and minimize JVM-induced noise, the benchma
 3. **Preemptive garbage collection**: `System.gc()` is explicitly invoked before each scenario block begins. This clears out models and triples from previous scenarios, ensuring that each benchmark starts with a clean heap and reducing the likelihood of a major GC pause during measurement.
 4. **Inference engine reuse**: For reasoning scenarios, the `InfModel` is expanded once via `inf.prepare()` before any queries are measured. This allows us to measure the one-time **Inference Expansion** cost separately from the "hot" query performance of the engine.
 5. **Hard timeout protection**: Every reasoning and SHACL task is protected by a **5-minute (300s) safety timeout**. If a task exceeds this limit, it is aborted and marked as `[TIMEOUT]` or `[SKIPPED]`, ensuring the benchmark continues even if a reasoner enters an infinite loop or triggers a performance blowout.
+
+### Understanding row expansion (Asserted vs. Inferred)
+
+When running with the `owlrl` strategy, you will notice row counts reported as `42 (10+32)`. This breakdown distinguishes between:
+
+- **Asserted rows (10)**: The raw data explicitly present in the SBOM.
+- **Inferred rows (+32)**: The "hidden" data discovered by the reasoner.
+
+In the SPDX ontology, this expansion typically comes from:
+
+- **Class hierarchy**: Querying for `spdx:Element` automatically includes all `spdx:Software`, `spdx:Relationship`, etc., via `rdfs:subClassOf` transitivity.
+- **Identity hubbing**: `owl:sameAs` links between versioned IRIs allow the reasoner to "hub" data, effectively multiplying the number of ways a single entity can be found.
+- **Property transitivity**: Chain-based queries (like dependency depth) expand as the reasoner follows transitive property paths.
 
 ---
 
@@ -174,7 +187,7 @@ The benchmark runner is instrumented to catch `OutOfMemoryError` and `QueryCance
 
 ## Results
 
-Result summary from `iribench % iribench run --reasoner spdx-custom`
+Result summary from `iribench run --reasoner spdx-custom`,
 on Apple M4 with 32 GB RAM, on Java 25.0.2 (OpenJDK 64-Bit Server VM):
 
 ```text
@@ -196,73 +209,73 @@ Approaches compared:
 [...]
 
 Summary — Overhead vs Shared namespace
-+---------------+--------------------------------------+--------+------+----------+--------------+
-| Namespace     | Query                                | Method | Wall | vs.      | Rows         |
-| scenario      |                                      |        | ms   | baseline |              |
-+---------------+--------------------------------------+--------+------+----------+--------------+
-| Shared (2)    | Find packages + names                | direct | 1.7  | baseline | 26           |
-| Shared (2)    | Packages with licenses               | direct | 1.1  | baseline | 25           |
-| Shared (2)    | Dependency chain (2-hop)             | direct | 2.1  | baseline | 15           |
-| Shared (2)    | Count elements by type               | direct | 1.6  | baseline | 10           |
-| Shared (2)    | subClassOf 1-hop: ?x a Core/Artifact | direct | 0.6  | baseline | 2            |
-| Shared (2)    | subClassOf 2-hop: ?x a Core/Element  | direct | 0.5  | baseline | 1            |
-| Shared (2)    | Element + leaf type (transitivity)   | direct | 0.8  | baseline | 1            |
-| Shared (2)    | rdfs:domain: Core/from->Relationship | direct | 0.9  | baseline | 127          |
-| Shared (2)    | Find packages + names                | owlrl  | 1.8  | baseline | 26           |
-| Shared (2)    | Packages with licenses               | owlrl  | 1.4  | baseline | 25           |
-| Shared (2)    | Dependency chain (2-hop)             | owlrl  | 4.4  | baseline | 15           |
-| Shared (2)    | Count elements by type               | owlrl  | 2.8  | baseline | 42           |
-| Shared (2)    | subClassOf 1-hop: ?x a Core/Artifact | owlrl  | 0.6  | baseline | 83           |
-| Shared (2)    | subClassOf 2-hop: ?x a Core/Element  | owlrl  | 0.8  | baseline | 226          |
-| Shared (2)    | Element + leaf type (transitivity)   | owlrl  | 4.5  | baseline | 416          |
-| Shared (2)    | rdfs:domain: Core/from->Relationship | owlrl  | 1.1  | baseline | 127          |
-| Versioned (2) | Find packages + names                | union  | 1.5  | 0.88x    | 52 (26x2)    |
-| Versioned (2) | Packages with licenses               | union  | 1.2  | 1.05x    | 50 (25x2)    |
-| Versioned (2) | Dependency chain (2-hop)             | union  | 2.4  | 1.12x    | 30 (15x2)    |
-| Versioned (2) | Count elements by type               | union  | 1.4  | 0.90x    | 20 (10x2)    |
-| Versioned (2) | subClassOf 1-hop: ?x a Core/Artifact | union  | 0.6  | 1.05x    | 4 (2x2)      |
-| Versioned (2) | subClassOf 2-hop: ?x a Core/Element  | union  | 0.6  | 1.14x    | 2 (1x2)      |
-| Versioned (2) | Element + leaf type (transitivity)   | union  | 0.9  | 1.15x    | 2 (1x2)      |
-| Versioned (2) | rdfs:domain: Core/from->Relationship | union  | 1.0  | 1.11x    | 254 (127x2)  |
-| Versioned (2) | Find packages + names                | owlrl  | 1.5  | 0.85x    | 52 (26x2)    |
-| Versioned (2) | Packages with licenses               | owlrl  | 1.5  | 1.06x    | 50 (25x2)    |
-| Versioned (2) | Dependency chain (2-hop)             | owlrl  | 9.2  | 2.09x    | 30 (15x2)    |
-| Versioned (2) | Count elements by type               | owlrl  | 7.0  | 2.48x    | 52           |
-| Versioned (2) | subClassOf 1-hop: ?x a Core/Artifact | owlrl  | 0.7  | 1.10x    | 166 (83x2)   |
-| Versioned (2) | subClassOf 2-hop: ?x a Core/Element  | owlrl  | 0.9  | 1.12x    | 456          |
-| Versioned (2) | Element + leaf type (transitivity)   | owlrl  | 6.6  | 1.49x    | 838          |
-| Versioned (2) | rdfs:domain: Core/from->Relationship | owlrl  | 1.2  | 1.15x    | 254 (127x2)  |
-| Shared (5)    | Find packages + names                | direct | 0.9  | baseline | 26           |
-| Shared (5)    | Packages with licenses               | direct | 0.9  | baseline | 25           |
-| Shared (5)    | Dependency chain (2-hop)             | direct | 1.1  | baseline | 15           |
-| Shared (5)    | Count elements by type               | direct | 0.9  | baseline | 10           |
-| Shared (5)    | subClassOf 1-hop: ?x a Core/Artifact | direct | 0.5  | baseline | 2            |
-| Shared (5)    | subClassOf 2-hop: ?x a Core/Element  | direct | 0.5  | baseline | 1            |
-| Shared (5)    | Element + leaf type (transitivity)   | direct | 0.6  | baseline | 1            |
-| Shared (5)    | rdfs:domain: Core/from->Relationship | direct | 0.6  | baseline | 127          |
-| Shared (5)    | Find packages + names                | owlrl  | 0.9  | baseline | 26           |
-| Shared (5)    | Packages with licenses               | owlrl  | 0.7  | baseline | 25           |
-| Shared (5)    | Dependency chain (2-hop)             | owlrl  | 1.8  | baseline | 15           |
-| Shared (5)    | Count elements by type               | owlrl  | 1.6  | baseline | 42           |
-| Shared (5)    | subClassOf 1-hop: ?x a Core/Artifact | owlrl  | 0.5  | baseline | 83           |
-| Shared (5)    | subClassOf 2-hop: ?x a Core/Element  | owlrl  | 0.5  | baseline | 226          |
-| Shared (5)    | Element + leaf type (transitivity)   | owlrl  | 1.9  | baseline | 416          |
-| Shared (5)    | rdfs:domain: Core/from->Relationship | owlrl  | 0.7  | baseline | 127          |
-| Versioned (5) | Find packages + names                | union  | 2.2  | 2.51x    | 130 (26x5)   |
-| Versioned (5) | Packages with licenses               | union  | 1.8  | 1.95x    | 125 (25x5)   |
-| Versioned (5) | Dependency chain (2-hop)             | union  | 3.6  | 3.31x    | 122          |
-| Versioned (5) | Count elements by type               | union  | 2.0  | 2.16x    | 50 (10x5)    |
-| Versioned (5) | subClassOf 1-hop: ?x a Core/Artifact | union  | 0.8  | 1.78x    | 10 (2x5)     |
-| Versioned (5) | subClassOf 2-hop: ?x a Core/Element  | union  | 0.8  | 1.72x    | 5 (1x5)      |
-| Versioned (5) | Element + leaf type (transitivity)   | union  | 1.2  | 1.99x    | 5 (1x5)      |
-| Versioned (5) | rdfs:domain: Core/from->Relationship | union  | 1.4  | 2.37x    | 634          |
-| Versioned (5) | Find packages + names                | owlrl  | 2.2  | 2.51x    | 130 (26x5)   |
-| Versioned (5) | Packages with licenses               | owlrl  | 2.2  | 2.98x    | 125 (25x5)   |
-| Versioned (5) | Dependency chain (2-hop)             | owlrl  | 28.9 | 15.88x   | 122          |
-| Versioned (5) | Count elements by type               | owlrl  | 10.4 | 6.32x    | 52           |
-| Versioned (5) | subClassOf 1-hop: ?x a Core/Artifact | owlrl  | 0.7  | 1.36x    | 415 (83x5)   |
-| Versioned (5) | subClassOf 2-hop: ?x a Core/Element  | owlrl  | 1.0  | 1.97x    | 1130 (226x5) |
-| Versioned (5) | Element + leaf type (transitivity)   | owlrl  | 11.4 | 6.02x    | 2079         |
-| Versioned (5) | rdfs:domain: Core/from->Relationship | owlrl  | 1.7  | 2.35x    | 634          |
-+---------------+--------------------------------------+--------+------+----------+--------------+
++-----------+--------------------------------------+--------+------+----------+------+-----------------------+
+| Namespace | Query                                | Method | Wall | vs.      | Rows | Notes                 |
+| scenario  |                                      |        | ms   | baseline |      |                       |
++-----------+--------------------------------------+--------+------+----------+------+-----------------------+
+| 2-shared  | Find packages + names                | direct | 1.7  | baseline | 26   |                       |
+| 2-shared  | Packages with licenses               | direct | 1.1  | baseline | 25   |                       |
+| 2-shared  | Dependency chain (2-hop)             | direct | 2.2  | baseline | 15   | trans                 |
+| 2-shared  | Count elements by type               | direct | 1.7  | baseline | 10   | hier                  |
+| 2-shared  | subClassOf 1-hop: ?x a Core/Artifact | direct | 0.6  | baseline | 2    | hier                  |
+| 2-shared  | subClassOf 2-hop: ?x a Core/Element  | direct | 0.5  | baseline | 1    | hier                  |
+| 2-shared  | Element + leaf type (transitivity)   | direct | 0.8  | baseline | 1    | hier + trans          |
+| 2-shared  | rdfs:domain: Core/from->Relationship | direct | 0.8  | baseline | 127  | domain                |
+| 2-shared  | Find packages + names                | owlrl  | 1.7  | baseline | 26   |                       |
+| 2-shared  | Packages with licenses               | owlrl  | 1.4  | baseline | 25   |                       |
+| 2-shared  | Dependency chain (2-hop)             | owlrl  | 4.2  | baseline | 15   | trans                 |
+| 2-shared  | Count elements by type               | owlrl  | 3.0  | baseline | 42   | 10 + hier 32          |
+| 2-shared  | subClassOf 1-hop: ?x a Core/Artifact | owlrl  | 0.7  | baseline | 83   | 2 + hier 81           |
+| 2-shared  | subClassOf 2-hop: ?x a Core/Element  | owlrl  | 0.8  | baseline | 226  | 1 + hier 225          |
+| 2-shared  | Element + leaf type (transitivity)   | owlrl  | 4.4  | baseline | 416  | 1 + hier + trans 415  |
+| 2-shared  | rdfs:domain: Core/from->Relationship | owlrl  | 1.0  | baseline | 127  | domain                |
+| 2-ver     | Find packages + names                | union  | 1.5  | 0.89x    | 52   | (26x2)                |
+| 2-ver     | Packages with licenses               | union  | 1.2  | 1.11x    | 50   | (25x2)                |
+| 2-ver     | Dependency chain (2-hop)             | union  | 2.3  | 1.06x    | 30   | trans (15x2)          |
+| 2-ver     | Count elements by type               | union  | 1.6  | 0.92x    | 20   | hier (10x2)           |
+| 2-ver     | subClassOf 1-hop: ?x a Core/Artifact | union  | 0.6  | 1.10x    | 4    | hier (2x2)            |
+| 2-ver     | subClassOf 2-hop: ?x a Core/Element  | union  | 0.6  | 1.16x    | 2    | hier (1x2)            |
+| 2-ver     | Element + leaf type (transitivity)   | union  | 0.9  | 1.15x    | 2    | hier + trans (1x2)    |
+| 2-ver     | rdfs:domain: Core/from->Relationship | union  | 1.1  | 1.26x    | 254  | domain (127x2)        |
+| 2-ver     | Find packages + names                | owlrl  | 1.5  | 0.84x    | 52   | hubbing (26x2)        |
+| 2-ver     | Packages with licenses               | owlrl  | 1.6  | 1.13x    | 50   | hubbing (25x2)        |
+| 2-ver     | Dependency chain (2-hop)             | owlrl  | 9.0  | 2.11x    | 30   | trans (15x2)          |
+| 2-ver     | Count elements by type               | owlrl  | 7.1  | 2.38x    | 52   | 10x2 + hier 32        |
+| 2-ver     | subClassOf 1-hop: ?x a Core/Artifact | owlrl  | 0.7  | 1.07x    | 166  | 2x2 + hier 162        |
+| 2-ver     | subClassOf 2-hop: ?x a Core/Element  | owlrl  | 0.9  | 1.14x    | 456  | hier ≈(226x2)         |
+| 2-ver     | Element + leaf type (transitivity)   | owlrl  | 7.0  | 1.59x    | 838  | hier + trans ≈(416x2) |
+| 2-ver     | rdfs:domain: Core/from->Relationship | owlrl  | 1.2  | 1.16x    | 254  | domain (127x2)        |
+| 5-shared  | Find packages + names                | direct | 0.7  | baseline | 26   |                       |
+| 5-shared  | Packages with licenses               | direct | 0.7  | baseline | 25   |                       |
+| 5-shared  | Dependency chain (2-hop)             | direct | 1.0  | baseline | 15   | trans                 |
+| 5-shared  | Count elements by type               | direct | 0.9  | baseline | 10   | hier                  |
+| 5-shared  | subClassOf 1-hop: ?x a Core/Artifact | direct | 0.4  | baseline | 2    | hier                  |
+| 5-shared  | subClassOf 2-hop: ?x a Core/Element  | direct | 0.5  | baseline | 1    | hier                  |
+| 5-shared  | Element + leaf type (transitivity)   | direct | 0.6  | baseline | 1    | hier + trans          |
+| 5-shared  | rdfs:domain: Core/from->Relationship | direct | 0.6  | baseline | 127  | domain                |
+| 5-shared  | Find packages + names                | owlrl  | 0.8  | baseline | 26   |                       |
+| 5-shared  | Packages with licenses               | owlrl  | 0.7  | baseline | 25   |                       |
+| 5-shared  | Dependency chain (2-hop)             | owlrl  | 1.9  | baseline | 15   | trans                 |
+| 5-shared  | Count elements by type               | owlrl  | 1.6  | baseline | 42   | 10 + hier 32          |
+| 5-shared  | subClassOf 1-hop: ?x a Core/Artifact | owlrl  | 0.5  | baseline | 83   | 2 + hier 81           |
+| 5-shared  | subClassOf 2-hop: ?x a Core/Element  | owlrl  | 0.5  | baseline | 226  | 1 + hier 225          |
+| 5-shared  | Element + leaf type (transitivity)   | owlrl  | 1.9  | baseline | 416  | 1 + hier + trans 415  |
+| 5-shared  | rdfs:domain: Core/from->Relationship | owlrl  | 0.7  | baseline | 127  | domain                |
+| 5-ver     | Find packages + names                | union  | 2.2  | 2.91x    | 130  | (26x5)                |
+| 5-ver     | Packages with licenses               | union  | 1.7  | 2.58x    | 125  | (25x5)                |
+| 5-ver     | Dependency chain (2-hop)             | union  | 3.9  | 3.78x    | 122  | trans ≈(15x5)         |
+| 5-ver     | Count elements by type               | union  | 2.0  | 2.23x    | 50   | hier (10x5)           |
+| 5-ver     | subClassOf 1-hop: ?x a Core/Artifact | union  | 0.8  | 1.85x    | 10   | hier (2x5)            |
+| 5-ver     | subClassOf 2-hop: ?x a Core/Element  | union  | 0.8  | 1.60x    | 5    | hier (1x5)            |
+| 5-ver     | Element + leaf type (transitivity)   | union  | 1.4  | 2.29x    | 5    | hier + trans (1x5)    |
+| 5-ver     | rdfs:domain: Core/from->Relationship | union  | 1.5  | 2.35x    | 634  | domain ≈(127x5)       |
+| 5-ver     | Find packages + names                | owlrl  | 2.3  | 2.78x    | 130  | hubbing (26x5)        |
+| 5-ver     | Packages with licenses               | owlrl  | 2.1  | 3.04x    | 125  | hubbing (25x5)        |
+| 5-ver     | Dependency chain (2-hop)             | owlrl  | 27.5 | 14.77x   | 122  | trans ≈(15x5)         |
+| 5-ver     | Count elements by type               | owlrl  | 9.7  | 5.88x    | 52   | hier ≈(42x5)          |
+| 5-ver     | subClassOf 1-hop: ?x a Core/Artifact | owlrl  | 0.7  | 1.48x    | 415  | 2x5 + hier 405        |
+| 5-ver     | subClassOf 2-hop: ?x a Core/Element  | owlrl  | 1.0  | 1.85x    | 1130 | 1x5 + hier 1125       |
+| 5-ver     | Element + leaf type (transitivity)   | owlrl  | 13.5 | 7.21x    | 2079 | hier + trans ≈(416x5) |
+| 5-ver     | rdfs:domain: Core/from->Relationship | owlrl  | 1.8  | 2.70x    | 634  | domain ≈(127x5)       |
++-----------+--------------------------------------+--------+------+----------+------+-----------------------+
 ```

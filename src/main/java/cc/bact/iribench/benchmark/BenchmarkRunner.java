@@ -466,7 +466,7 @@ public class BenchmarkRunner {
         combinedModel.add(canonicalOntoG);
 
         ScenarioResult result = new ScenarioResult();
-        result.scenarioName = "Shared (" + versions.size() + ")";
+        result.scenarioName = versions.size() + "-shared";
         result.versionsCount = versions.size();
         result.dataTriples = dataModel.size();
         result.equivTriples = 0;
@@ -756,7 +756,7 @@ public class BenchmarkRunner {
         if (verbose)
             System.out.printf("%n[Scenario %d/%d] Versioned - 1 version (%s)%n", currentScenario++,
                     totalScenarios, allV.get(0));
-        results.add(runVersioned(oneV, sharedBase, pkgPerVersion, repeats, verbose, "Versioned (1)",
+        results.add(runVersioned(oneV, sharedBase, pkgPerVersion, repeats, verbose, "1-ver",
                 owlEnabled, reasonerType));
 
         if (allV.size() < 2)
@@ -776,7 +776,7 @@ public class BenchmarkRunner {
         if (verbose)
             System.out.printf("%n[Scenario %d/%d] Versioned - 2 versions%n", currentScenario++,
                     totalScenarios);
-        results.add(runVersioned(twoV, sharedBase, pkgPerVersion, repeats, verbose, "Versioned (2)",
+        results.add(runVersioned(twoV, sharedBase, pkgPerVersion, repeats, verbose, "2-ver",
                 owlEnabled, reasonerType));
 
         if (allV.size() <= 2)
@@ -793,7 +793,7 @@ public class BenchmarkRunner {
             System.out.printf("%n[Scenario %d/%d] Versioned - %d versions%n", currentScenario++,
                     totalScenarios, allV.size());
         results.add(runVersioned(versions, sharedBase, pkgPerVersion, repeats, verbose,
-                "Versioned (" + allV.size() + ")", owlEnabled, reasonerType));
+                allV.size() + "-ver", owlEnabled, reasonerType));
 
         return results;
     }
