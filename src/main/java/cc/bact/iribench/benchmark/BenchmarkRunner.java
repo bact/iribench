@@ -1,4 +1,4 @@
-package cc.bact.sameasbench.benchmark;
+package cc.bact.iribench.benchmark;
 
 import org.apache.jena.query.*;
 import org.apache.jena.rdf.model.*;
@@ -9,13 +9,11 @@ import org.apache.jena.riot.RDFDataMgr;
 import org.apache.jena.riot.Lang;
 import org.apache.jena.shacl.*;
 import org.apache.jena.vocabulary.OWL;
-import org.apache.jena.vocabulary.RDF;
-import org.apache.jena.vocabulary.RDFS;
-import cc.bact.sameasbench.Measurement;
-import cc.bact.sameasbench.datagen.SbomGenerator;
-import cc.bact.sameasbench.datagen.GeneratorConfig;
-import cc.bact.sameasbench.ontology.OntologyVersion;
-import cc.bact.sameasbench.ontology.EquivGraphBuilder;
+import cc.bact.iribench.Measurement;
+import cc.bact.iribench.datagen.SbomGenerator;
+import cc.bact.iribench.datagen.GeneratorConfig;
+import cc.bact.iribench.ontology.OntologyVersion;
+import cc.bact.iribench.ontology.EquivGraphBuilder;
 
 import org.apache.jena.reasoner.rulesys.*;
 import java.io.ByteArrayInputStream;
@@ -23,37 +21,39 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 public class BenchmarkRunner {
-    
+
     // Using a 5-minute safety timeout to prevent reasoner blowout on complex ontologies
 
     // -------------------------------------------------------------------
     // Internal: run SPARQL, return row count
     // -------------------------------------------------------------------
-    private static final java.util.concurrent.ExecutorService BENCH_EXECUTOR = 
-        java.util.concurrent.Executors.newCachedThreadPool(r -> {
-            Thread t = new Thread(r, "Bench-Worker");
-            t.setDaemon(true);
-            return t;
-        });
+    private static final java.util.concurrent.ExecutorService BENCH_EXECUTOR =
+            java.util.concurrent.Executors.newCachedThreadPool(r -> {
+                Thread t = new Thread(r, "Bench-Worker");
+                t.setDaemon(true);
+                return t;
+            });
 
     /**
-     * Runs a task with a hard 300s (5-minute) timeout.
-     * Returns the result or throws QueryCancelledException on timeout.
+     * Runs a task with a hard 300s (5-minute) timeout. Returns the result or throws
+     * QueryCancelledException on timeout.
      */
-    private static <T> T runWithTimeout(java.util.concurrent.Callable<T> task, Runnable onCancel) throws Exception {
-        java.util.concurrent.CompletableFuture<T> future = 
-            java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-                try {
-                    return task.call();
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-            }, BENCH_EXECUTOR);
+    private static <T> T runWithTimeout(java.util.concurrent.Callable<T> task, Runnable onCancel)
+            throws Exception {
+        java.util.concurrent.CompletableFuture<T> future =
+                java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return task.call();
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                }, BENCH_EXECUTOR);
 
         try {
             return future.get(300, java.util.concurrent.TimeUnit.SECONDS);
         } catch (java.util.concurrent.TimeoutException e) {
-            if (onCancel != null) onCancel.run();
+            if (onCancel != null)
+                onCancel.run();
             future.cancel(true);
             throw new org.apache.jena.query.QueryCancelledException();
         } catch (java.util.concurrent.ExecutionException e) {
@@ -61,10 +61,12 @@ public class BenchmarkRunner {
             if (cause instanceof RuntimeException && cause.getCause() instanceof Exception) {
                 throw (Exception) cause.getCause();
             }
-            if (cause instanceof Exception) throw (Exception) cause;
+            if (cause instanceof Exception)
+                throw (Exception) cause;
             throw new RuntimeException(cause);
         } catch (InterruptedException e) {
-            if (onCancel != null) onCancel.run();
+            if (onCancel != null)
+                onCancel.run();
             future.cancel(true);
             Thread.currentThread().interrupt();
             throw new org.apache.jena.query.QueryCancelledException();
@@ -85,7 +87,8 @@ public class BenchmarkRunner {
         } catch (org.apache.jena.query.QueryCancelledException e) {
             throw e;
         } catch (Exception e) {
-            if (e instanceof RuntimeException re && re.getCause() instanceof org.apache.jena.query.QueryCancelledException) {
+            if (e instanceof RuntimeException re
+                    && re.getCause() instanceof org.apache.jena.query.QueryCancelledException) {
                 throw (org.apache.jena.query.QueryCancelledException) re.getCause();
             }
             throw new RuntimeException(e);
@@ -98,7 +101,8 @@ public class BenchmarkRunner {
     // -------------------------------------------------------------------
     private static InfModel expandOwlRl(Model combinedModel, ReasonerType type) {
         Reasoner reasoner;
-        if (type == null) type = ReasonerType.MINI;
+        if (type == null)
+            type = ReasonerType.MINI;
         switch (type) {
             case FULL -> reasoner = ReasonerRegistry.getOWLReasoner();
             case MINI -> reasoner = ReasonerRegistry.getOWLMiniReasoner();
@@ -121,45 +125,49 @@ public class BenchmarkRunner {
                     return null;
                 }, null);
             });
-            if (verbose) System.out.printf("[%.1f ms]\n", m.wallMs);
+            if (verbose)
+                System.out.printf("[%.1f ms]\n", m.wallMs);
             return m;
         } catch (org.apache.jena.query.QueryCancelledException e) {
-            if (verbose) System.out.println("[TIMEOUT]");
+            if (verbose)
+                System.out.println("[TIMEOUT]");
             return new Measurement(300000, 0);
         } catch (Exception e) {
-            if (verbose) System.out.println("[ERROR]");
+            if (verbose)
+                System.out.println("[ERROR]");
             return new Measurement(0, 0);
         }
     }
 
     /**
-     * Bare-minimum rule-based reasoner for SPDX identity hubbing.
-     * WARNING: This is NOT a complete OWL reasoner. It only supports:
-     * - owl:equivalentClass / owl:equivalentProperty
-     * - owl:sameAs
-     * - rdfs:subClassOf / rdfs:subPropertyOf (transitive)
-     * - rdfs:domain / rdfs:range
-     * It will NOT work for complex OWL features (oneOf, unionOf, etc.)
-     * and is intended solely for benchmarking identity resolution.
+     * Bare-minimum rule-based reasoner for SPDX identity hubbing. WARNING: This is NOT a complete
+     * OWL reasoner. It only supports: - owl:equivalentClass / owl:equivalentProperty - owl:sameAs -
+     * rdfs:subClassOf / rdfs:subPropertyOf (transitive) - rdfs:domain / rdfs:range It will NOT work
+     * for complex OWL features (oneOf, unionOf, etc.) and is intended solely for benchmarking
+     * identity resolution.
      */
     private static Reasoner getBareMinimumReasoner() {
         String rdf = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
         String rdfs = "http://www.w3.org/2000/01/rdf-schema#";
         String owl = "http://www.w3.org/2002/07/owl#";
 
-        String rules =
-                "[equivClass: (?a <" + owl + "equivalentClass> ?b) -> (?a <" + rdfs + "subClassOf> ?b), (?b <" + rdfs + "subClassOf> ?a)]\n"
-                        + "[equivProp:  (?a <" + owl + "equivalentProperty> ?b) -> (?a <" + rdfs + "subPropertyOf> ?b), (?b <" + rdfs + "subPropertyOf> ?a)]\n"
-                        + "[sameAsSym:  (?a <" + owl + "sameAs> ?b) -> (?b <" + owl + "sameAs> ?a)]\n"
-                        + "[sameAsTrans: (?a <" + owl + "sameAs> ?b), (?b <" + owl + "sameAs> ?c) -> (?a <" + owl + "sameAs> ?c)]\n"
-                        + "[subClassTrans: (?a <" + rdfs + "subClassOf> ?b), (?b <" + rdfs + "subClassOf> ?c) -> (?a <" + rdfs + "subClassOf> ?c)]\n"
-                        + "[subPropTrans:  (?a <" + rdfs + "subPropertyOf> ?b), (?b <" + rdfs + "subPropertyOf> ?c) -> (?a <" + rdfs + "subPropertyOf> ?c)]\n"
-                        + "[typeTrans:  (?x <" + rdf + "type> ?a), (?a <" + rdfs + "subClassOf> ?b) -> (?x <" + rdf + "type> ?b)]\n"
-                        + "[propTrans:  (?s ?p ?o), (?p <" + rdfs + "subPropertyOf> ?q) -> (?s ?q ?o)]\n"
-                        + "[domain:     (?p <" + rdfs + "domain> ?c), (?s ?p ?o) -> (?s <" + rdf + "type> ?c)]\n"
-                        + "[range:      (?p <" + rdfs + "range> ?c), (?s ?p ?o) -> (?o <" + rdf + "type> ?c)]\n"
-                        + "[sameAsSubj: (?s ?p ?o), (?s <" + owl + "sameAs> ?s1) -> (?s1 ?p ?o)]\n"
-                        + "[sameAsObj:  (?s ?p ?o), (?o <" + owl + "sameAs> ?o1) -> (?s ?p ?o1)]";
+        String rules = "[equivClass: (?a <" + owl + "equivalentClass> ?b) -> (?a <" + rdfs
+                + "subClassOf> ?b), (?b <" + rdfs + "subClassOf> ?a)]\n" + "[equivProp:  (?a <"
+                + owl + "equivalentProperty> ?b) -> (?a <" + rdfs + "subPropertyOf> ?b), (?b <"
+                + rdfs + "subPropertyOf> ?a)]\n" + "[sameAsSym:  (?a <" + owl
+                + "sameAs> ?b) -> (?b <" + owl + "sameAs> ?a)]\n" + "[sameAsTrans: (?a <" + owl
+                + "sameAs> ?b), (?b <" + owl + "sameAs> ?c) -> (?a <" + owl + "sameAs> ?c)]\n"
+                + "[subClassTrans: (?a <" + rdfs + "subClassOf> ?b), (?b <" + rdfs
+                + "subClassOf> ?c) -> (?a <" + rdfs + "subClassOf> ?c)]\n" + "[subPropTrans:  (?a <"
+                + rdfs + "subPropertyOf> ?b), (?b <" + rdfs + "subPropertyOf> ?c) -> (?a <" + rdfs
+                + "subPropertyOf> ?c)]\n" + "[typeTrans:  (?x <" + rdf + "type> ?a), (?a <" + rdfs
+                + "subClassOf> ?b) -> (?x <" + rdf + "type> ?b)]\n"
+                + "[propTrans:  (?s ?p ?o), (?p <" + rdfs + "subPropertyOf> ?q) -> (?s ?q ?o)]\n"
+                + "[domain:     (?p <" + rdfs + "domain> ?c), (?s ?p ?o) -> (?s <" + rdf
+                + "type> ?c)]\n" + "[range:      (?p <" + rdfs + "range> ?c), (?s ?p ?o) -> (?o <"
+                + rdf + "type> ?c)]\n" + "[sameAsSubj: (?s ?p ?o), (?s <" + owl
+                + "sameAs> ?s1) -> (?s1 ?p ?o)]\n" + "[sameAsObj:  (?s ?p ?o), (?o <" + owl
+                + "sameAs> ?o1) -> (?s ?p ?o1)]";
         return new GenericRuleReasoner(Rule.parseRules(rules));
     }
 
@@ -206,13 +214,15 @@ public class BenchmarkRunner {
         } catch (org.apache.jena.query.QueryCancelledException te) {
             if (verbose) {
                 System.out.print(" [TIMEOUT] ");
-                System.out.println("\033[2m(Suggestion: Try a lighter reasoner like OWL Micro if this continues)\033[0m");
+                System.out.println(
+                        "\033[2m(Suggestion: Try a lighter reasoner like OWL Micro if this continues)\033[0m");
                 System.out.flush();
             }
             return new QueryResult(name, method, 0, new Measurement(300000, 0), true, null);
         } catch (Throwable t) {
             if (verbose) {
-                System.out.print(" [ERROR: " + t.getClass().getSimpleName() + ": " + t.getMessage() + "] ");
+                System.out.print(
+                        " [ERROR: " + t.getClass().getSimpleName() + ": " + t.getMessage() + "] ");
                 System.out.flush();
             }
             if (t instanceof OutOfMemoryError) {
@@ -248,7 +258,7 @@ public class BenchmarkRunner {
                         if (s.getObject().isURIResource())
                             targetClassUris.add(s.getObject().asResource().getURI());
                     });
-            
+
             try {
                 for (String tc : targetClassUris) {
                     String q = "SELECT DISTINCT ?x WHERE { ?x a <" + tc + "> }";
@@ -313,8 +323,7 @@ public class BenchmarkRunner {
                 return new ShaclResult(name, "shacl", false, 0, 0, new Measurement(0, 0),
                         "OOM: " + getHeapConfig());
             }
-            return new ShaclResult(name, "shacl", false, 0, 0, new Measurement(0, 0),
-                    t.toString());
+            return new ShaclResult(name, "shacl", false, 0, 0, new Measurement(0, 0), t.toString());
         }
     }
 
@@ -356,7 +365,8 @@ public class BenchmarkRunner {
     // execution paths before the first timed scenario. A 1-triple graph
     // is insufficient: Jena's query planner and OWL rule engine only reach
     // steady-state performance once they process schema-like triple patterns.
-    public static void warmup(String sharedBase, boolean owlEnabled, ReasonerType reasonerType) throws Exception {
+    public static void warmup(String sharedBase, boolean owlEnabled, ReasonerType reasonerType)
+            throws Exception {
         Model wg = SbomGenerator.generate(sharedBase, "https://example.org/sbom/warmup/",
                 new GeneratorConfig(5, 99));
         // 1. SPARQL — all query shapes used in the benchmark
@@ -426,8 +436,8 @@ public class BenchmarkRunner {
     }
 
     public static ScenarioResult runSharedNamespace(Map<String, OntologyVersion> versions,
-            String sharedBase, int pkgPerVersion, int repeats, boolean verbose, boolean owlEnabled, ReasonerType reasonerType)
-            throws Exception {
+            String sharedBase, int pkgPerVersion, int repeats, boolean verbose, boolean owlEnabled,
+            ReasonerType reasonerType) throws Exception {
 
         if (verbose)
             System.out.println("  Building shared-namespace data graph ...");
@@ -494,7 +504,8 @@ public class BenchmarkRunner {
                 System.out.printf("    [%d/%d] %s ", currentTask++, totalTasks, q[0]);
                 System.out.flush();
             }
-            QueryResult qr = benchQuery(dataModel, q[0], "direct", q[1], repeats, reasonerType, verbose);
+            QueryResult qr =
+                    benchQuery(dataModel, q[0], "direct", q[1], repeats, reasonerType, verbose);
             result.queries.add(qr);
             if (verbose)
                 System.out.printf(" [%.1f ms]\n", qr.measurement().wallMs);
@@ -503,15 +514,18 @@ public class BenchmarkRunner {
         if (owlEnabled) {
             for (String[] q : queries) {
                 if (verbose) {
-                    System.out.printf("    [%d/%d] %s (%s) ", currentTask++, totalTasks, q[0], reasonerType.label());
+                    System.out.printf("    [%d/%d] %s (%s) ", currentTask++, totalTasks, q[0],
+                            reasonerType.label());
                     System.out.flush();
                 }
                 QueryResult qr;
                 if (owlTimedOut) {
                     qr = new QueryResult(q[0], "owlrl", 0, new Measurement(300000, 0), true, null);
-                    if (verbose) System.out.print(" [SKIPPED due to expansion timeout] ");
+                    if (verbose)
+                        System.out.print(" [SKIPPED due to expansion timeout] ");
                 } else {
-                    qr = benchQuery(inferenceModel, q[0], "owlrl", q[1], repeats, reasonerType, verbose);
+                    qr = benchQuery(inferenceModel, q[0], "owlrl", q[1], repeats, reasonerType,
+                            verbose);
                 }
                 result.queries.add(qr);
                 if (verbose)
@@ -525,7 +539,8 @@ public class BenchmarkRunner {
                     totalTasks);
             System.out.flush();
         }
-        ShaclResult sr = benchShacl(dataModel, "Package + Relationship shapes", shapesTtl, repeats, verbose);
+        ShaclResult sr =
+                benchShacl(dataModel, "Package + Relationship shapes", shapesTtl, repeats, verbose);
         result.shacl.add(sr);
         if (verbose)
             System.out.printf(" [%.1f ms]\n", sr.measurement().wallMs);
@@ -640,7 +655,8 @@ public class BenchmarkRunner {
                 System.out.printf("    [%d/%d] %s (UNION) ", currentTask++, totalTasks, q[0]);
                 System.out.flush();
             }
-            QueryResult qr = benchQuery(dataModel, q[0], "union", q[1], repeats, reasonerType, verbose);
+            QueryResult qr =
+                    benchQuery(dataModel, q[0], "union", q[1], repeats, reasonerType, verbose);
             result.queries.add(qr);
             if (verbose)
                 System.out.printf(" [%.1f ms]\n", qr.measurement().wallMs);
@@ -649,15 +665,18 @@ public class BenchmarkRunner {
         if (owlEnabled) {
             for (String[] q : canonicalQueries) {
                 if (verbose) {
-                    System.out.printf("    [%d/%d] %s (%s) ", currentTask++, totalTasks, q[0], reasonerType.label());
+                    System.out.printf("    [%d/%d] %s (%s) ", currentTask++, totalTasks, q[0],
+                            reasonerType.label());
                     System.out.flush();
                 }
                 QueryResult qr;
                 if (owlTimedOut) {
                     qr = new QueryResult(q[0], "owlrl", 0, new Measurement(300000, 0), true, null);
-                    if (verbose) System.out.print(" [SKIPPED due to expansion timeout] ");
+                    if (verbose)
+                        System.out.print(" [SKIPPED due to expansion timeout] ");
                 } else {
-                    qr = benchQuery(inferenceModel, q[0], "owlrl", q[1], repeats, reasonerType, verbose);
+                    qr = benchQuery(inferenceModel, q[0], "owlrl", q[1], repeats, reasonerType,
+                            verbose);
                 }
                 result.queries.add(qr);
                 if (verbose)
@@ -683,24 +702,29 @@ public class BenchmarkRunner {
         if (verbose)
             System.out.printf(" [%.1f ms]\n", sr1.measurement().wallMs);
 
-        // SHACL - canonical shapes + OWL-RL
-        String canonicalShapesTtl = ShaclShapes.makeShapes(sharedBase);
-        if (verbose) {
-            System.out.printf("    [%d/%d] SHACL (Canonical shapes + %s) ", currentTask++,
-                    totalTasks, reasonerType.label());
-            System.out.flush();
+        if (owlEnabled) {
+            // SHACL - canonical shapes + OWL-RL
+            String canonicalShapesTtl = ShaclShapes.makeShapes(sharedBase);
+            if (verbose) {
+                System.out.printf("    [%d/%d] SHACL (Canonical shapes + %s) ", currentTask++,
+                        totalTasks, reasonerType.label());
+                System.out.flush();
+            }
+
+            ShaclResult sr2;
+            if (owlTimedOut) {
+                sr2 = new ShaclResult("Canonical shapes + OWL-RL", "shacl", false, 0, 0,
+                        new Measurement(300000, 0), "SKIPPED due to expansion timeout");
+                if (verbose)
+                    System.out.print(" [SKIPPED due to expansion timeout] ");
+            } else {
+                sr2 = benchShacl(inferenceModel, "Canonical shapes + OWL-RL", canonicalShapesTtl,
+                        repeats, verbose);
+            }
+            result.shacl.add(sr2);
+            if (verbose)
+                System.out.printf(" [%.1f ms]\n", sr2.measurement().wallMs);
         }
-        
-        ShaclResult sr2;
-        if (owlTimedOut) {
-             sr2 = new ShaclResult("Canonical shapes + OWL-RL", "shacl", false, 0, 0, new Measurement(300000, 0), "SKIPPED due to expansion timeout");
-             if (verbose) System.out.print(" [SKIPPED due to expansion timeout] ");
-        } else {
-             sr2 = benchShacl(inferenceModel, "Canonical shapes + OWL-RL", canonicalShapesTtl, repeats, verbose);
-        }
-        result.shacl.add(sr2);
-        if (verbose)
-            System.out.printf(" [%.1f ms]\n", sr2.measurement().wallMs);
 
         return result;
     }
@@ -709,8 +733,8 @@ public class BenchmarkRunner {
     // Top-level entry point
     // -------------------------------------------------------------------
     public static List<ScenarioResult> runAll(Map<String, OntologyVersion> versions,
-            String sharedBase, int pkgPerVersion, int repeats, boolean verbose, boolean owlEnabled, ReasonerType reasonerType)
-            throws Exception {
+            String sharedBase, int pkgPerVersion, int repeats, boolean verbose, boolean owlEnabled,
+            ReasonerType reasonerType) throws Exception {
 
         List<String> allV = new ArrayList<>(versions.keySet());
         List<ScenarioResult> results = new ArrayList<>();
@@ -746,8 +770,8 @@ public class BenchmarkRunner {
         if (verbose)
             System.out.printf("%n[Scenario %d/%d] Shared namespace (2 versions, canonical IRI)%n",
                     currentScenario++, totalScenarios);
-        results.add(
-                runSharedNamespace(twoV, sharedBase, pkgPerVersion, repeats, verbose, owlEnabled, reasonerType));
+        results.add(runSharedNamespace(twoV, sharedBase, pkgPerVersion, repeats, verbose,
+                owlEnabled, reasonerType));
 
         if (verbose)
             System.out.printf("%n[Scenario %d/%d] Versioned - 2 versions%n", currentScenario++,

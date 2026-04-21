@@ -1,14 +1,14 @@
-package cc.bact.sameasbench;
+package cc.bact.iribench;
 
 import picocli.CommandLine;
 import picocli.CommandLine.*;
 
-import cc.bact.sameasbench.benchmark.BenchmarkRunner;
-import cc.bact.sameasbench.benchmark.ReasonerType;
-import cc.bact.sameasbench.benchmark.ScenarioResult;
-import cc.bact.sameasbench.ontology.*;
-import cc.bact.sameasbench.report.ReportPrinter;
-import cc.bact.sameasbench.toy.ToyOntology;
+import cc.bact.iribench.benchmark.BenchmarkRunner;
+import cc.bact.iribench.benchmark.ReasonerType;
+import cc.bact.iribench.benchmark.ScenarioResult;
+import cc.bact.iribench.ontology.*;
+import cc.bact.iribench.report.ReportPrinter;
+import cc.bact.iribench.toy.ToyOntology;
 
 import org.apache.jena.sys.JenaSystem;
 
@@ -16,13 +16,13 @@ import java.nio.file.*;
 import java.util.*;
 
 @Command(
-    name = "sameas-bench-java",
+    name = "iribench",
     version = "1.0",
     mixinStandardHelpOptions = true,
     subcommands = {Main.RunCmd.class, Main.QuickCmd.class, Main.SmokeCmd.class,
                    Main.ListCacheCmd.class, Main.ClearCacheCmd.class},
     description = {
-        "sameas-bench-java -- benchmark the computational cost of versioned IRIs in the SPDX ontology.",
+        "iribench -- benchmark the computational cost of versioned IRIs in the SPDX ontology.",
         "",
         "Eight benchmark query types:",
         "  - Identity: Find packages, licenses, and dependency chains",
@@ -201,7 +201,7 @@ public class Main implements Runnable {
             reasonerType = ReasonerType.MINI;
         }
 
-        System.out.printf("\033[1;36msameas-bench-java\033[0m v1.0  |  Apache Jena 6.0  |  jena-shacl%n");
+        System.out.printf("\033[1;36miribench\033[0m v1.0  |  Apache Jena 6.0  |  jena-shacl%n");
         System.out.println();
 
         try {
@@ -216,7 +216,7 @@ public class Main implements Runnable {
             } else {
                 System.out.println("\033[1;36mLoading SPDX ontologies ...\033[0m");
                 System.out.println("  Cache: " + Constants.CACHE_DIR +
-                    "  (sameas-bench-java clear-cache to re-download)");
+                    "  (iribench clear-cache to re-download)");
                 List<String> vList = Constants.versionsForN(nVersions);
                 versions = OntologyLoader.loadVersions(vList, verbose);
                 sharedBase = Constants.SHARED_BASE;

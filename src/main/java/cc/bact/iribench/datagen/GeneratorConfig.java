@@ -1,4 +1,4 @@
-package cc.bact.sameasbench.datagen;
+package cc.bact.iribench.datagen;
 
 public record GeneratorConfig(
     int numPackages,

@@ -1,4 +1,4 @@
-package cc.bact.sameasbench;
+package cc.bact.iribench;
 
 import java.lang.management.ManagementFactory;
 import java.lang.management.ThreadMXBean;

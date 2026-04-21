@@ -1,4 +1,4 @@
-package cc.bact.sameasbench.ontology;
+package cc.bact.iribench.ontology;
 
 import org.apache.jena.rdf.model.Model;
 import java.util.List;

@@ -1,4 +1,4 @@
-package cc.bact.sameasbench.benchmark;
+package cc.bact.iribench.benchmark;
 
 import java.util.List;
 

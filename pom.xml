@@ -5,7 +5,7 @@
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>cc.bact</groupId>
-  <artifactId>sameas-bench-java</artifactId>
+  <artifactId>iribench</artifactId>
   <version>1.0</version>
   <packaging>jar</packaging>
 
@@ -47,7 +47,7 @@
         <artifactId>exec-maven-plugin</artifactId>
         <version>3.2.0</version>
         <configuration>
-          <mainClass>cc.bact.sameasbench.Main</mainClass>
+          <mainClass>cc.bact.iribench.Main</mainClass>
         </configuration>
       </plugin>
       <!-- shade plugin merges META-INF/services — required for Jena ServiceLoader init -->
@@ -60,10 +60,10 @@
             <phase>package</phase>
             <goals><goal>shade</goal></goals>
             <configuration>
-              <finalName>sameas-bench</finalName>
+              <finalName>iribench</finalName>
               <transformers>
                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                  <mainClass>cc.bact.sameasbench.Main</mainClass>
+                  <mainClass>cc.bact.iribench.Main</mainClass>
                 </transformer>
                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                 <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">

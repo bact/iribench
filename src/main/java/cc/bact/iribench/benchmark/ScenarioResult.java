@@ -1,6 +1,6 @@
-package cc.bact.sameasbench.benchmark;
+package cc.bact.iribench.benchmark;
 
-import cc.bact.sameasbench.Measurement;
+import cc.bact.iribench.Measurement;
 import java.util.ArrayList;
 import java.util.List;
 

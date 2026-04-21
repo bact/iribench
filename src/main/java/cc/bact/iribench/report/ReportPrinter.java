@@ -1,7 +1,7 @@
-package cc.bact.sameasbench.report;
+package cc.bact.iribench.report;
 
-import cc.bact.sameasbench.benchmark.*;
-import cc.bact.sameasbench.benchmark.ReasonerType;
+import cc.bact.iribench.benchmark.*;
+import cc.bact.iribench.benchmark.ReasonerType;
 
 import java.lang.management.ManagementFactory;
 import java.lang.management.OperatingSystemMXBean;
@@ -131,7 +131,7 @@ public class ReportPrinter {
                 + "========================================================================"
                 + RESET);
         System.out.println(BOLD + CYAN
-                + "  sameas-bench-java — SPDX Versioned IRI Overhead Benchmark" + RESET);
+                + "  iribench — SPDX Versioned IRI Overhead Benchmark" + RESET);
         System.out.println(
                 BOLD + CYAN + "  Apache Jena 6.0  |  " + label + "  |  jena-shacl" + RESET);
         System.out.println(BOLD + CYAN

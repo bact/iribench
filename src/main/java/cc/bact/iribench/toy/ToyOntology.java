@@ -1,9 +1,9 @@
-package cc.bact.sameasbench.toy;
+package cc.bact.iribench.toy;
 
 import org.apache.jena.rdf.model.*;
 import org.apache.jena.vocabulary.*;
 import org.apache.jena.vocabulary.OWL2;
-import cc.bact.sameasbench.ontology.OntologyVersion;
+import cc.bact.iribench.ontology.OntologyVersion;
 
 import java.util.*;
 

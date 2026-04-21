@@ -1,6 +1,6 @@
-package cc.bact.sameasbench.benchmark;
+package cc.bact.iribench.benchmark;
 
-import cc.bact.sameasbench.ontology.Constants;
+import cc.bact.iribench.ontology.Constants;
 
 import java.io.IOException;
 import java.nio.file.Files;

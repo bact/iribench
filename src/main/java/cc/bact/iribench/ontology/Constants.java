@@ -1,4 +1,4 @@
-package cc.bact.sameasbench.ontology;
+package cc.bact.iribench.ontology;
 
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -24,7 +24,7 @@ public final class Constants {
     public static final int MAX_VERSIONS = 10;
 
     public static final Path CACHE_DIR =
-        Path.of(System.getProperty("user.home"), ".cache", "sameas-bench");
+        Path.of(System.getProperty("user.home"), ".cache", "iribench");
 
     public static String versionBaseIri(String version) {
         return "https://spdx.org/rdf/" + version + "/terms/";

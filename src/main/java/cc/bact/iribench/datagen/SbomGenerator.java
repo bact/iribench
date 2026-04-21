@@ -1,4 +1,4 @@
-package cc.bact.sameasbench.datagen;
+package cc.bact.iribench.datagen;
 
 import org.apache.jena.datatypes.xsd.XSDDatatype;
 import org.apache.jena.rdf.model.*;
@@ -102,9 +102,9 @@ public class SbomGenerator {
 
         // ---- CreationInfo --------------------------------------------------
         Resource ci   = inst(g, docNamespace, "creation-info");
-        Resource tool = inst(g, docNamespace, "tool-sameas-bench");
+        Resource tool = inst(g, docNamespace, "tool-iribench");
         g.add(tool, RDF.type,                        term(g, baseIri, CLS_TOOL));
-        g.add(tool, prop(g, baseIri, P_NAME),        g.createLiteral("sameas-bench/1.0"));
+        g.add(tool, prop(g, baseIri, P_NAME),        g.createLiteral("iribench/1.0"));
         g.add(ci,   RDF.type,                        term(g, baseIri, CLS_CREATION_INFO));
         g.add(ci,   prop(g, baseIri, P_CREATED),     g.createTypedLiteral("2024-01-01T00:00:00Z", XSDDatatype.XSDdateTimeStamp));
         g.add(ci,   prop(g, baseIri, P_CREATED_BY),  tool);

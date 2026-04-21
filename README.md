@@ -1,4 +1,4 @@
-# sameas-bench-java
+# iribench
 
 Benchmarks the computational cost of versioned IRIs in the SPDX ontology
 (`https://spdx.org/rdf/3.0.1/terms/`, `3.1/terms/` etc.) rather than a
@@ -26,19 +26,19 @@ export JAVA_OPTS="-Xms2g -Xmx16g"
 ```
 
 No other setup needed. SPDX ontology TTLs are downloaded on first run and
-cached in `~/.cache/sameas-bench/`.
+cached in `~/.cache/iribench/`.
 
 ---
 
 ## Install
 
 ```bash
-git clone https://github.com/bact/sameas-bench-java
-cd sameas-bench-java
+git clone https://github.com/bact/iribench
+cd iribench
 
-./install.sh                     # installs to ~/.local/bin/sameas-bench-java
+./install.sh                     # installs to ~/.local/bin/iribench
 # or:
-PREFIX=/usr/local ./install.sh   # installs to /usr/local/bin/sameas-bench-java
+PREFIX=/usr/local ./install.sh   # installs to /usr/local/bin/iribench
 ```
 
 If `~/.local/bin` is not in `PATH`, add it:
@@ -50,8 +50,8 @@ export PATH="$HOME/.local/bin:$PATH"   # add to ~/.zshrc or ~/.bashrc
 Verify:
 
 ```bash
-sameas-bench-java --version
-sameas-bench-java smoke       # runs in-memory smoke test, ~20 s
+iribench --version
+iribench smoke       # runs in-memory smoke test, ~20 s
 ```
 
 ---
@@ -61,8 +61,8 @@ sameas-bench-java smoke       # runs in-memory smoke test, ~20 s
 ### `smoke` — fast in-memory test (no download)
 
 ```bash
-sameas-bench-java smoke                   # 3 toy versions, 4 packages each
-sameas-bench-java smoke --versions 5      # 5 toy versions
+iribench smoke                   # 3 toy versions, 4 packages each
+iribench smoke --versions 5      # 5 toy versions
 ```
 
 Good for development and CI. Completes in seconds.
@@ -70,9 +70,9 @@ Good for development and CI. Completes in seconds.
 ### `quick` — fast run with real SPDX ontologies
 
 ```bash
-sameas-bench-java quick                   # 2 versions, 10 packages, 1 repeat, no reasoning
-sameas-bench-java quick --versions 3      # 3 versions
-sameas-bench-java quick --owlrl           # include reasoning (slow with standard reasoners!)
+iribench quick                   # 2 versions, 10 packages, 1 repeat, no reasoning
+iribench quick --versions 3      # 3 versions
+iribench quick --owlrl           # include reasoning (slow with standard reasoners!)
 ```
 
 Downloads SPDX 3.0.1 and 3.1 TTLs on first run (cached afterward).
@@ -80,11 +80,11 @@ Downloads SPDX 3.0.1 and 3.1 TTLs on first run (cached afterward).
 ### `run` — full benchmark
 
 ```bash
-sameas-bench-java run                          # 5 versions, 25 packages, 3 repeats
-sameas-bench-java run --versions 3             # fewer versions
-sameas-bench-java run --reasoner jena-mini     # use OWL Mini (default)
-sameas-bench-java run --reasoner spdx-custom   # use SPDX-optimized reasoner (recommended)
-sameas-bench-java quick --no-owlrl             # skip reasoning (use this if reasoners are too slow)
+iribench run                          # 5 versions, 25 packages, 3 repeats
+iribench run --versions 3             # fewer versions
+iribench run --reasoner jena-mini     # use OWL Mini (default)
+iribench run --reasoner spdx-custom   # use SPDX-optimized reasoner (recommended)
+iribench quick --no-owlrl             # skip reasoning (use this if reasoners are too slow)
 ```
 
 #### Reasoner Options (`--reasoner`)
@@ -97,8 +97,8 @@ sameas-bench-java quick --no-owlrl             # skip reasoning (use this if rea
 ### `list-cache` / `clear-cache`
 
 ```bash
-sameas-bench-java list-cache    # show cached ontology TTLs + generated SHACL shapes
-sameas-bench-java clear-cache   # delete cached TTLs (forces re-download on next run)
+iribench list-cache    # show cached ontology TTLs + generated SHACL shapes
+iribench clear-cache   # delete cached TTLs (forces re-download on next run)
 ```
 
 ---
@@ -129,8 +129,8 @@ sameas-bench-java clear-cache   # delete cached TTLs (forces re-download on next
 ## Building from source (without install)
 
 ```bash
-./mvnw package -q                              # builds target/sameas-bench.jar
-java -jar target/sameas-bench.jar smoke        # run directly
+./mvnw package -q                              # builds target/iribench.jar
+java -jar target/iribench.jar smoke        # run directly
 ```
 
 ---
