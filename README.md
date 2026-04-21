@@ -1,12 +1,11 @@
 # sameas-bench-java
 
-Benchmarks the computational cost of versioned IRIs in the SPDX ontology —
-the problem where each SPDX release uses its own namespace
-(`https://spdx.org/rdf/3.1/terms/` vs `3.0.1/terms/` etc.) rather than a
-shared canonical one.
+Benchmarks the computational cost of versioned IRIs in the SPDX ontology
+(`https://spdx.org/rdf/3.0.1/terms/`, `3.1/terms/` etc.) rather than a
+shared canonical one (`https://spdx.org/rdf/3/terms/`).
 
-Java port of [sameas-bench](https://github.com/bact/sameas-bench) (Python/rdflib).
-Uses **Apache Jena 6.0** (ARQ + OWL reasoner + `jena-shacl`).
+Java port of [sameas-bench](https://github.com/bact/sameas-bench) (Python/RDFLib).
+Uses **Apache Jena 6.0** (ARQ + OWL reasoner + `jena-shacl`) as it is much faster than ones in RDFLib.
 
 See: [spdx-spec #1378](https://github.com/spdx/spdx-spec/issues/1378)
 
@@ -34,12 +33,12 @@ cached in `~/.cache/sameas-bench/`.
 ## Install
 
 ```bash
-git clone https://github.com/bact/sameas-bench
-cd sameas-bench/sameas-bench-java
+git clone https://github.com/bact/sameas-bench-java
+cd sameas-bench-java
 
-./install.sh                     # installs to ~/.local/bin/sameas-bench
+./install.sh                     # installs to ~/.local/bin/sameas-bench-java
 # or:
-PREFIX=/usr/local ./install.sh   # installs to /usr/local/bin/sameas-bench
+PREFIX=/usr/local ./install.sh   # installs to /usr/local/bin/sameas-bench-java
 ```
 
 If `~/.local/bin` is not in `PATH`, add it:
@@ -51,7 +50,7 @@ export PATH="$HOME/.local/bin:$PATH"   # add to ~/.zshrc or ~/.bashrc
 Verify:
 
 ```bash
-sameas-bench-java --version   # 1.0
+sameas-bench-java --version
 sameas-bench-java smoke       # runs in-memory smoke test, ~20 s
 ```
 
@@ -64,8 +63,6 @@ sameas-bench-java smoke       # runs in-memory smoke test, ~20 s
 ```bash
 sameas-bench-java smoke                   # 3 toy versions, 4 packages each
 sameas-bench-java smoke --versions 5      # 5 toy versions
-sameas-bench-java smoke --no-owlrl        # skip reasoning expansion
-sameas-bench-java smoke --reasoner spdx-custom # use SPDX-optimized reasoner
 ```
 
 Good for development and CI. Completes in seconds.
@@ -83,10 +80,11 @@ Downloads SPDX 3.0.1 and 3.1 TTLs on first run (cached afterward).
 ### `run` — full benchmark
 
 ```bash
-sameas-bench-java run                     # 5 versions, 25 packages, 3 repeats
-sameas-bench-java run --versions 3        # fewer versions
-sameas-bench-java run --reasoner jena-mini # use OWL Mini (default)
-sameas-bench-java run --reasoner spdx-custom # use SPDX-optimized reasoner (recommended)
+sameas-bench-java run                          # 5 versions, 25 packages, 3 repeats
+sameas-bench-java run --versions 3             # fewer versions
+sameas-bench-java run --reasoner jena-mini     # use OWL Mini (default)
+sameas-bench-java run --reasoner spdx-custom   # use SPDX-optimized reasoner (recommended)
+sameas-bench-java quick --no-owlrl             # skip reasoning (use this if reasoners are too slow)
 ```
 
 #### Reasoner Options (`--reasoner`)
@@ -94,7 +92,7 @@ sameas-bench-java run --reasoner spdx-custom # use SPDX-optimized reasoner (reco
 - `jena-mini` (Default): Jena's standard OWL Mini reasoner.
 - `jena-micro`: Lightweight OWL reasoner (faster than OWL Mini; but does not support `owl:sameAs`).
 - `jena-full`: Full OWL reasoner (slowest, most complete; better support of `owl:oneOf`, `owl:disjointWith`, etc. than OWL Mini).
-- `spdx-custom`: **SPDX-optimized**. A specialized, high-speed reasoner that only processes `owl:sameAs`, `owl:equivalentClass`, and `owl:equivalentProperty`. Optimized specifically for SPDX 3 identity hubbing. **Note:** This reasoner is designed solely for identity linking; it does not support other OWL features and may not function correctly if SPDX is integrated with complex external ontologies. Use this for large-scale benchmarks where identity resolution is the primary requirement.
+- `spdx-custom`: **SPDX-optimized**. A specialized, high-speed reasoner that only processes `owl:sameAs`, `owl:equivalentClass`, and `owl:equivalentProperty`. Optimized specifically for SPDX 3 identity hubbing. **Note:** This reasoner is designed solely for identity linking; it does not support other OWL features and may not function correctly if SPDX is integrated with external ontologies. Use this for large-scale benchmarks where identity resolution is the primary requirement.
 
 ### `list-cache` / `clear-cache`
 
